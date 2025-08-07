@@ -1,0 +1,43 @@
+# ========== General ==========
+.DS_Store
+.env
+*.env
+*.log
+
+# ========== Logs ==========
+logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ========== Node Modules (Both Frontend + Backend) ==========
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# ========== Build Outputs ==========
+dist/
+client/dist/
+server/dist/
+dist-ssr/
+
+# ========== Vite ==========
+.vite
+
+# ========== Local/Env Configs ==========
+*.local
+
+# ========== Editor Directories & Files ==========
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ========== OS Junk ==========
+Thumbs.db
