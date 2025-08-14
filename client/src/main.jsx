@@ -6,7 +6,7 @@ import './index.css'
 // Importing Layout and Page components
 import Layout from './components/Layout.jsx';
 import Dashboard from './pages/Dashboard.jsx';
-import BehavioralCoach from './components/BehavioralCoach.jsx'; // We already built this one
+import BehavioralCoach from './pages/BehavioralCoach.jsx'; // We already built this one
 import DsaArena from './pages/DsaArena.jsx';
 import ResumeReviewer from './pages/ResumeReviewer.jsx';
 
