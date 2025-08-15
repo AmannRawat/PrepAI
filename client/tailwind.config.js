@@ -16,7 +16,7 @@
           fontFamily: {
             sans: ['Inter', 'sans-serif'],
             mono: ['"Fira Code"', 'monospace'],
-          }
+          }, //HERE
         },
       },
       plugins: [],
