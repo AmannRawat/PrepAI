@@ -1,3 +1,13 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* New Way for applying css config */
+@theme {
+  --color-background: #24283b;
+  --color-surface: #4F4242;
+  --color-accent: #E64833;
+  --color-text-primary: #FBE9D0;
+  --color-text-secondary: #90AEAD;
+
+  --font-sans: Inter, sans-serif;
+  --font-mono: "Fira Code", monospace;
+}
