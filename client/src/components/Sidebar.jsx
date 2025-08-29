@@ -15,9 +15,6 @@ const Sidebar = () => {
       <div className="flex items-center gap-2 mb-12">
         <span className="text-2xl font-bold text-accent font-mono">PrepAI</span>
       </div>
-      <div className="bg-background">
-  Tailwind custom theme working 🎉
-</div>
       
       <nav className="flex flex-col space-y-4">
         <NavLink to="/" className={getNavLinkClass}>

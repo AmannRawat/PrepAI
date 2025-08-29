@@ -1,13 +1,43 @@
 @import "tailwindcss";
 
 /* New Way for applying css config */
-@theme {
+
+/* Orange theme */
+/* @theme {
   --color-background: #24283b;
-  --color-surface: #4F4242;
-  --color-accent: #E64833;
+  --color-surface: #4F4242; */
+  /* --color-surface: #737669; */
+  /* --color-surface: #6e4c33; */
+  /* --color-accent: #E64833;
   --color-text-primary: #FBE9D0;
   --color-text-secondary: #90AEAD;
 
+  --font-sans: Inter, sans-serif;
+  --font-mono: "Fira Code", monospace;
+} */
+
+/* Blue shades theme */
+/* @theme {
+  --color-background: #836A4E;
+  --color-surface: #45362D;
+  --color-accent: #6366f1;
+  --color-text-primary: #e2e8f0;
+  --color-text-secondary: #94a3b8;
+  --font-sans: Inter, sans-serif;
+  --font-mono: "Fira Code", monospace;
+} */
+
+/* Dark Acedemia Aesthetic */
+@theme {
+  --color-background: #261F1C;      /* Rich Espresso */
+  --color-surface: #40322C;         /* Worn Leather */
+  /* --color-accent: #C5A15A;          Antique Gold */
+  --color-accent: #ffc554;          /* NEW Antique Gold */
+   --color-accent-darker: #B38F49;
+  --color-text-primary: #EAE0D5;   /* Aged Parchment */
+  --color-text-secondary: #A69888;  /* Muted Tan */
+
+ /* --font-sans: 'Merriweather', serif; */
   --font-sans: Inter, sans-serif;
   --font-mono: "Fira Code", monospace;
 }
