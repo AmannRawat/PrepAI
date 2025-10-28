@@ -10,10 +10,16 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 //  Initialize BOTH models
 // Model for fast tasks like problem generation
-const flashModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
-// More powerful model for complex reasoning like code evaluation
-const proModel = genAI.getGenerativeModel({ model: 'gemini-1.5-pro-latest' });
+// const flashModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+const flashModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+// // More powerful model for complex reasoning like code evaluation
+const proModel = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+const multer = require('multer');
+const pdf = require('pdf-parse');
 
+
+const storage = multer.memoryStorage(); // Store files in memory
+const upload = multer({ storage: storage });
 const app = express();
 const PORT = process.env.PORT || 8000;
 
@@ -23,19 +29,37 @@ app.use(express.json());
 
 // A helper function to find and parse JSON from a string
 function extractJson(text) {
+    // Find the start and end of the potential JSON object
     const startIndex = text.indexOf('{');
     const endIndex = text.lastIndexOf('}');
-    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-        const jsonString = text.substring(startIndex, endIndex + 1);
+    
+    if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+        throw new Error("No valid JSON object found in the AI response.");
+    }
+
+    let jsonString = text.substring(startIndex, endIndex + 1);
+
+    try {
+        // Attempt 1: Try parsing directly
+        return JSON.parse(jsonString);
+    } catch (e1) {
+        console.warn("Initial JSON parsing failed. Attempting cleanup...", e1.message);
         try {
+            // Attempt 2: Try replacing common issues like single quotes for keys
+            // This regex specifically targets 'key': patterns common at the start of lines or after commas/braces
+            jsonString = jsonString.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":');
+             // Attempt to fix trailing commas (optional, but can help)
+            jsonString = jsonString.replace(/,\s*([}\]])/g, '$1'); 
+
             return JSON.parse(jsonString);
-        } catch (e) {
-            console.error("Failed to parse extracted JSON:", e);
-            throw new Error("Invalid JSON format in the AI response.");
+        } catch (e2) {
+            console.error("Failed to parse extracted JSON even after cleanup:", e2);
+            console.error("Problematic JSON string:", jsonString); // Log the string that failed
+            throw new Error("Invalid JSON format in the AI response even after cleanup.");
         }
     }
-    throw new Error("No valid JSON object found in the AI response.");
 }
+
 
 // Routes
 app.get('/', (req, res) => {
@@ -181,7 +205,50 @@ app.post('/api/behavioral-chat', async (req, res) => {
         res.status(500).json({ error: 'Failed to get AI response. Please try again.' });
     }
 });
+app.post('/api/review-resume', upload.single('resume'), async (req, res) => {
+    try {
+        // Check if a file was actually uploaded
+        if (!req.file) {
+            return res.status(400).json({ error: 'No resume file uploaded.' });
+        }
 
+        // 1. Extract text from the PDF buffer using pdf-parse
+        const data = await pdf(req.file.buffer);
+        const resumeText = data.text;
+
+        // 2. Craft the prompt for the AI (using the model variable)
+        const prompt = `
+            You are an expert career coach specializing in software engineering resumes.
+            Analyze the following resume text and provide constructive feedback as a clean, raw JSON object.
+
+            The JSON object must have this exact structure:
+            {
+              "atsAssessment": {
+                 "estimatedScore": "Provide an estimated ATS compatibility score out of 100 (e.g., 75). Base this score on factors like keyword relevance (common software engineering terms), clear structure, standard formatting, and the absence of elements that confuse ATS (like tables or complex graphics).",
+                 "explanation": "Briefly explain the score, mentioning specific strengths or weaknesses related to ATS readability. Suggest one key improvement."
+              },
+              "strengths": "List 2-3 key strengths of the resume (e.g., strong projects, relevant skills). Be specific.",
+              "areasForImprovement": "Identify 2-3 major areas that need significant improvement (e.g., lack of quantification, weak action verbs, unclear objective).",
+              "actionVerbSuggestions": "Analyze action verbs. Respond as a plain text string. List 3 strong verbs used. Then, list 3 weaker phrases found and suggest a stronger alternative for each (e.g., 'Instead of 'Built', try 'Engineered'.').",
+              "quantificationSuggestions": "Analyze quantifiable results. Respond as a plain text string. Point out 2 examples where adding numbers/data would show more impact. Format suggestions clearly (e.g., 'Original: [phrase]. Suggestion: [phrase with numbers].')."
+    }
+            --- RESUME TEXT TO ANALYZE ---
+            ${resumeText}
+            ---
+        `;
+
+        // 3. Call the AI model (make sure 'model' uses 'gemini-pro')
+        const result = await flashModel.generateContent(prompt);
+        const responseText = result.response.text();
+        const parsedResponse = extractJson(responseText); // Using existing helper function
+
+        res.status(200).json(parsedResponse); // Send the structured feedback
+
+    } catch (error) {
+        console.error("Error reviewing resume:", error);
+        res.status(500).json({ error: 'Failed to review resume. Please try again.' });
+    }
+});
 // Start the Server
 app.listen(PORT, () => {
     console.log(`Server is listening on http://localhost:${PORT}`);
