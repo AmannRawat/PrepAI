@@ -1,23 +1,21 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-
+const multer = require('multer');
+const pdf = require('pdf-parse');
+const mongoose = require('mongoose');
+const User = require('./models/User.model.js');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 // Importing and configure the Google Gemini SDK
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Initializing the SDK with API key from the .env file
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-//  Initialize BOTH models
 // Model for fast tasks like problem generation
-// const flashModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
 const flashModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
-// // More powerful model for complex reasoning like code evaluation
+//  More powerful model for complex reasoning like code evaluation
 const proModel = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
-const multer = require('multer');
-const pdf = require('pdf-parse');
-
-
 const storage = multer.memoryStorage(); // Store files in memory
 const upload = multer({ storage: storage });
 const app = express();
@@ -26,6 +24,11 @@ const PORT = process.env.PORT || 8000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+//MONGO DB CONNECTION
+mongoose.connect(process.env.DATABASE_URL)
+  .then(() => console.log('Successfully connected to MongoDB Atlas!'))
+  .catch((error) => console.error('Error connecting to MongoDB Atlas:', error));
 
 // A helper function to find and parse JSON from a string
 function extractJson(text) {
@@ -64,6 +67,95 @@ function extractJson(text) {
 // Routes
 app.get('/', (req, res) => {
     res.status(200).json({ message: "PrepAI Backend is running!" });
+});
+
+// User Signup Route
+app.post('/api/auth/signup', async (req, res) => {
+    try {
+        // Get email and password from the request body
+        const { email, password } = req.body;
+
+        // Checks for missing fields
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Please provide email and password.' });
+        }
+
+        // Checks if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ message: 'User with this email already exists.' });
+        }
+
+        // Creats the new user
+        // Note: The password will be automatically hashed by the 'pre-save' hook in User.model.js
+        const user = await User.create({
+            email,
+            password
+        });
+
+        // Sends a successful response
+        res.status(201).json({ message: 'User created successfully!', userId: user._id });
+
+    } catch (error) {
+        // Handles validation errors (e.g., password too short)
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({ message: error.message });
+        }
+        console.error("Error in signup:", error);
+        res.status(500).json({ message: 'Server error during signup.' });
+    }
+});
+
+// User Login Route
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        // Checks if user provided email and password
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Please provide email and password.' });
+        }
+
+        // Finds the user in the database
+        const user = await User.findOne({ email });
+        if (!user) {
+            // sends a generic "invalid" message for security
+            return res.status(401).json({ message: 'Invalid credentials.' });
+        }
+
+        // Compare the provided password with the hashed password in the DB
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            // Generic "invalid" message
+            return res.status(401).json({ message: 'Invalid credentials.' });
+        }
+
+        // User is valid! Create a JWT token
+        const payload = {
+            user: {
+                id: user._id,
+                email: user.email
+            }
+        };
+
+        const token = jwt.sign(
+            payload,
+            process.env.JWT_SECRET, // added this to .env file!
+            { expiresIn: '1d' } // Token expires in 1 day
+        );
+
+        // Sends the token back to the user
+        res.status(200).json({
+            message: 'Login successful!',
+            token,
+            userId: user._id,
+            email: user.email
+        });
+
+    } catch (error) {
+        console.error("Error in login:", error);
+        res.status(500).json({ message: 'Server error during login.' });
+    }
 });
 
 // Route for generating problems (uses flashModel)
@@ -105,7 +197,7 @@ app.post('/api/generate-problem', async (req, res) => {
     }
 });
 
-//  Adding the new route for code evaluation 
+// New route for code evaluation 
 app.post('/api/evaluate-code', async (req, res) => {
     try {
         const { problem, code, language } = req.body;
@@ -120,7 +212,7 @@ app.post('/api/evaluate-code', async (req, res) => {
             
             **Problem:**
             Title: ${problem.title}
-            Description: ${problem.description}
+            Description: ${problem.description}7
 
             **User's Code (${language}):**
             \`\`\`${language}

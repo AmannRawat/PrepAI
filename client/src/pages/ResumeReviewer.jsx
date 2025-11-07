@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import  { useState } from 'react';
 import { Upload, Loader2 } from 'lucide-react'; // An icon for our upload button
 import axios from 'axios';
 

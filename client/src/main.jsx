@@ -10,6 +10,8 @@ import Dashboard from './pages/Dashboard.jsx';
 import BehavioralCoach from './pages/BehavioralCoach.jsx'; // We already built this one
 import DsaArena from './pages/DsaArena.jsx';
 import ResumeReviewer from './pages/ResumeReviewer.jsx';
+import LoginPage from './pages/LoginPage.jsx';
+import SignupPage from './pages/SignupPage.jsx';
 
 // Define the application routes
 const router = createBrowserRouter([
@@ -32,6 +34,14 @@ const router = createBrowserRouter([
       {
         path: "resume-reviewer",
         element: <ResumeReviewer />
+      },
+      {
+        path: "/login",
+        element: <LoginPage />
+      },
+      {
+        path: "/signup",
+        element: <SignupPage />
       }
     ]
   }
