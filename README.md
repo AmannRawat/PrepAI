@@ -66,7 +66,7 @@ This project is also a full learning journey for backend tech. The developer is 
 ### ✅ Status
 
 🛠️ In development.  
-📌 Currently working on: **Phase 1 - Behavioral Coach Module**
+📌 Currently working on: **Phase 4 - Authentication Page**
 
 ---
 
