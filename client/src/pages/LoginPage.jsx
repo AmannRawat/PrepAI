@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom'; // Use Link for navigation
 import axios from 'axios'; 
+import { useAuth } from '../context/AuthContext';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -8,7 +9,8 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const navigate = useNavigate();
+  const { login } = useAuth(); // Get the login function from context
+  const navigate = useNavigate(); // Gets the navigate function from React Router
   
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -24,10 +26,9 @@ const LoginPage = () => {
 
       // If login is successful, save the token and user info
       if (response.status === 200) {
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('userEmail', response.data.email);
-        
-        // 3. Redirect to the dashboard
+        // Call context to update state
+        login(response.data); 
+        // Call navigate to redirect
         navigate('/');
       }
 

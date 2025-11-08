@@ -2,8 +2,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import './index.css'
-
 import { ThemeProvider } from './context/ThemeContext.jsx';
+import { AuthProvider } from './context/AuthContext.jsx';
 // Importing Layout and Page components
 import Layout from './components/Layout.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -35,22 +35,32 @@ const router = createBrowserRouter([
         path: "resume-reviewer",
         element: <ResumeReviewer />
       },
-      {
-        path: "/login",
-        element: <LoginPage />
-      },
-      {
-        path: "/signup",
-        element: <SignupPage />
-      }
+      // {
+      //   path: "/login",
+      //   element: <LoginPage />
+      // },
+      // {
+      //   path: "/signup",
+      //   element: <SignupPage />
+      // }
     ]
+  },
+  {
+    path: "/login",
+    element: <LoginPage /> // This route has NO sidebar
+  },
+  {
+    path: "/signup",
+    element: <SignupPage /> // This route has NO sidebar
   }
 ]);
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ThemeProvider>
-      <RouterProvider router={router} />
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
     </ThemeProvider>
   </React.StrictMode>,
 )

@@ -1,8 +1,17 @@
 // import React from 'react';  NO NEED IN VITE new version React
-import { Outlet } from 'react-router-dom';
+import { Outlet,Navigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import ThemeToggle from './ThemeToggle'; 
+import { useAuth } from '../context/AuthContext';
 const Layout = () => {
+  const { isLoggedIn } = useAuth(); //Get the user's login status from context
+  // Check if the user is logged in
+  if (!isLoggedIn) {
+    // If not logged in, redirect them to the /login page
+    return <Navigate to="/login" replace />;
+  }
+
+  // If logged in, show the layout with sidebar and main content
   return (
    <div className="flex h-screen bg-background text-text-primary font-sans">
       {/* Persistent sidebar */}
