@@ -1,8 +1,9 @@
 // import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Home, Code, MessageSquare, FileText } from 'lucide-react';
-
+import { Home, Code, MessageSquare, FileText,User, LogOut } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 const Sidebar = () => {
+  const { logout, userEmail } = useAuth();
   // A helper function for NavLink's className to apply styles for active links
   const getNavLinkClass = ({ isActive }) => {
     return isActive
@@ -36,12 +37,24 @@ const Sidebar = () => {
       </nav>
 
       {/* Placeholder for user profile at the bottom */}
-      <div className="mt-auto">
-        <div className="flex items-center p-3 rounded-lg hover:bg-surface transition-colors duration-200 cursor-pointer">
-            {/* User profile content will go here in Phase 4 */}
-            <div className="w-10 h-10 bg-text-secondary/50 rounded-full mr-4"></div>
-            <span>User Profile</span>
-        </div>
+     <div className="mt-auto">
+        {/* Changed this to a NavLink pointing to /profile */}
+        <NavLink to="/profile" className={getNavLinkClass}>
+            <div className="w-10 h-10 bg-text-secondary/50 rounded-full mr-4 flex items-center justify-center">
+              <User size={20} className="text-text-primary" />
+            </div>
+            {/* <span className="truncate">{userEmail || 'User Profile'}</span> */}
+            <span className="truncate">User Profile</span>
+        </NavLink>
+
+        {/* New Logout Button */}
+        <button 
+          onClick={logout} 
+          className="flex items-center p-3 rounded-lg hover:bg-surface transition-colors duration-200 w-full mt-2"
+        >
+            <LogOut className="mr-4" />
+            <span>Logout</span>
+        </button>
       </div>
     </aside>
   );

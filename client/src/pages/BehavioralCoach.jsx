@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, LogOut, RefreshCw } from 'lucide-react'; // A nice icon for the send button
+import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 
 const BehavioralCoach = () => {
-    const initialMessage = { sender: 'ai', text: "Hello! I'm your AI Behavioral Coach. To start, tell me about a time you had to work on a team." };
+  const { token } = useAuth();
+  const initialMessage = { sender: 'ai', text: "Hello! I'm your AI Behavioral Coach. To start, tell me about a time you had to work on a team." };
   // State to hold the conversation history
   const [messages, setMessages] = useState([initialMessage]);
   // State for the user's current input
@@ -56,6 +58,11 @@ const BehavioralCoach = () => {
       // 2. Call the real backend API with the new chat history
       const response = await axios.post('http://localhost:8000/api/behavioral-chat', {
         messages: newMessageHistory,
+      }, {
+        //  Add Authorization header
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
 
       let aiText = response.data.reply;
@@ -68,9 +75,16 @@ const BehavioralCoach = () => {
       //  Add the AI's response to the history
       setMessages(prev => [...prev, aiResponse]);
 
-    } catch (error) {
-      console.error("Error fetching AI response:", error);
-      const errorResponse = { sender: 'ai', text: "Sorry, I'm having trouble connecting. Please try again." };
+    } catch (err) {
+      //  Add better error handling for auth 
+      console.error("Error fetching AI response:", err);
+      let errorResponse;
+      if (err.response && err.response.status === 401) {
+        errorResponse = { sender: 'ai', text: "Sorry, your session has expired. Please log in again." };
+        //  logout() can also be called here
+      } else {
+        errorResponse = { sender: 'ai', text: "Sorry, I'm having trouble connecting. Please try again." };
+      }
       setMessages(prev => [...prev, errorResponse]);
     } finally {
       // Stop the loading indicator
@@ -90,19 +104,19 @@ const BehavioralCoach = () => {
         {messages.map((msg, index) => {
           if (msg.text === "USER_ACTION: End interview") return null;
           return (
-          <div
-            key={index}
-            className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
             <div
-              className={`max-w-xl p-3 rounded-lg whitespace-pre-wrap ${msg.sender === 'ai'
-                ? 'bg-background text-text-primary'
-                : 'bg-accent text-white'
-                }`}
+              key={index}
+              className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              {msg.text}
+              <div
+                className={`max-w-xl p-3 rounded-lg whitespace-pre-wrap ${msg.sender === 'ai'
+                  ? 'bg-background text-text-primary'
+                  : 'bg-accent text-white'
+                  }`}
+              >
+                {msg.text}
+              </div>
             </div>
-          </div>
           );
         })}
         {isLoading && (

@@ -5,11 +5,15 @@ const multer = require('multer');
 const pdf = require('pdf-parse');
 const mongoose = require('mongoose');
 const User = require('./models/User.model.js');
+const ResumeReview = require('./models/ResumeReview.model.js'); //causing error
+const ChatSession = require('./models/BehavioralChat.model.js');
+const DsaSubmission = require('./models/DsaSubmission.model.js');
+const authMiddleware = require('./middleware/auth.middleware.js');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+
 // Importing and configure the Google Gemini SDK
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-
 // Initializing the SDK with API key from the .env file
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // Model for fast tasks like problem generation
@@ -21,21 +25,22 @@ const upload = multer({ storage: storage });
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 
 //MONGO DB CONNECTION
 mongoose.connect(process.env.DATABASE_URL)
-  .then(() => console.log('Successfully connected to MongoDB Atlas!'))
-  .catch((error) => console.error('Error connecting to MongoDB Atlas:', error));
+    .then(() => console.log('Successfully connected to MongoDB Atlas!'))
+    .catch((error) => console.error('Error connecting to MongoDB Atlas:', error));
 
 // A helper function to find and parse JSON from a string
 function extractJson(text) {
     // Find the start and end of the potential JSON object
     const startIndex = text.indexOf('{');
     const endIndex = text.lastIndexOf('}');
-    
+
     if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
         throw new Error("No valid JSON object found in the AI response.");
     }
@@ -51,8 +56,8 @@ function extractJson(text) {
             // Attempt 2: Try replacing common issues like single quotes for keys
             // This regex specifically targets 'key': patterns common at the start of lines or after commas/braces
             jsonString = jsonString.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":');
-             // Attempt to fix trailing commas (optional, but can help)
-            jsonString = jsonString.replace(/,\s*([}\]])/g, '$1'); 
+            // Attempt to fix trailing commas (optional, but can help)
+            jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
 
             return JSON.parse(jsonString);
         } catch (e2) {
@@ -159,7 +164,8 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // Route for generating problems (uses flashModel)
-app.post('/api/generate-problem', async (req, res) => {
+// app.post('/api/generate-problem', async (req, res) => {
+app.post('/api/generate-problem', authMiddleware, async (req, res) => {
     try {
         const { topic, difficulty } = req.body;
         if (!topic || !difficulty) {
@@ -198,7 +204,7 @@ app.post('/api/generate-problem', async (req, res) => {
 });
 
 // New route for code evaluation 
-app.post('/api/evaluate-code', async (req, res) => {
+app.post('/api/evaluate-code', authMiddleware, async (req, res) => {
     try {
         const { problem, code, language } = req.body;
 
@@ -234,7 +240,18 @@ app.post('/api/evaluate-code', async (req, res) => {
         const responseText = result.response.text();
         // const cleanedJsonText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
         const parsedResponse = extractJson(responseText);
-
+        //Save the submission to the database ---
+        const newSubmission = new DsaSubmission({
+            user: req.user.id, // Get the user's ID
+            problem: {
+                title: problem.title,
+                description: problem.description,
+            },
+            language: language,
+            code: code,
+            feedback: parsedResponse // Save the AI's feedback
+        });
+        await newSubmission.save();
         res.status(200).json(parsedResponse);
 
     } catch (error) {
@@ -243,7 +260,7 @@ app.post('/api/evaluate-code', async (req, res) => {
     }
 });
 
-app.post('/api/behavioral-chat', async (req, res) => {
+app.post('/api/behavioral-chat', authMiddleware, async (req, res) => {
     try {
         const { messages } = req.body; // Expect an array of message objects
 
@@ -274,7 +291,7 @@ app.post('/api/behavioral-chat', async (req, res) => {
             parts: [{ text: msg.text }],
         }));
 
-        // 3. Start a chat session with the system prompt and history
+        // Start a chat session with the system prompt and history
         // const chat = proModel.startChat({
         const chat = flashModel.startChat({
             history: [
@@ -284,12 +301,26 @@ app.post('/api/behavioral-chat', async (req, res) => {
             ],
         });
 
-        // 4. Send the last message from the user to the AI
+        //  Send the last message from the user to the AI
         const lastUserMessage = messages[messages.length - 1].text;
         const result = await chat.sendMessage(lastUserMessage);
         const responseText = result.response.text();
 
-        // 5. Send the AI's reply back to the frontend
+        if (responseText.includes("[SESSION_END]")) {
+            // The AI is about to send its final message. Save the whole chat.
+            const finalMessages = [
+                ...messages.map(msg => ({ sender: msg.sender, text: msg.text })),
+                { sender: 'ai', text: responseText } // Include the final AI reply
+            ];
+
+            const newChatSession = new ChatSession({
+                user: req.user.id, // Get user ID from authMiddleware
+                messages: finalMessages
+            });
+            await newChatSession.save();
+        }
+
+        //  Send the AI's reply back to the frontend
         res.status(200).json({ reply: responseText });
 
     } catch (error) {
@@ -297,18 +328,20 @@ app.post('/api/behavioral-chat', async (req, res) => {
         res.status(500).json({ error: 'Failed to get AI response. Please try again.' });
     }
 });
-app.post('/api/review-resume', upload.single('resume'), async (req, res) => {
+
+app.post('/api/review-resume', authMiddleware, upload.single('resume'), async (req, res) => {
     try {
         // Check if a file was actually uploaded
         if (!req.file) {
             return res.status(400).json({ error: 'No resume file uploaded.' });
         }
-
-        // 1. Extract text from the PDF buffer using pdf-parse
+        const userId = req.user.id;
+        console.log(`Reviewing resume for user: ${userId}`);
+        //  Extract text from the PDF buffer using pdf-parse
         const data = await pdf(req.file.buffer);
         const resumeText = data.text;
 
-        // 2. Craft the prompt for the AI (using the model variable)
+        //  Craft the prompt for the AI (using the model variable)
         const prompt = `
             You are an expert career coach specializing in software engineering resumes.
             Analyze the following resume text and provide constructive feedback as a clean, raw JSON object.
@@ -329,10 +362,20 @@ app.post('/api/review-resume', upload.single('resume'), async (req, res) => {
             ---
         `;
 
-        // 3. Call the AI model (make sure 'model' uses 'gemini-pro')
+        //  Call the AI model (make sure 'model' uses 'gemini-pro')
         const result = await flashModel.generateContent(prompt);
         const responseText = result.response.text();
         const parsedResponse = extractJson(responseText); // Using existing helper function
+
+        const newReview = new ResumeReview({
+            user: req.user.id, // Get the user's ID from our authMiddleware
+            atsAssessment: parsedResponse.atsAssessment,
+            strengths: parsedResponse.strengths,
+            areasForImprovement: parsedResponse.areasForImprovement,
+            actionVerbSuggestions: parsedResponse.actionVerbSuggestions,
+            quantificationSuggestions: parsedResponse.quantificationSuggestions
+        });
+        await newReview.save();
 
         res.status(200).json(parsedResponse); // Send the structured feedback
 
@@ -341,6 +384,39 @@ app.post('/api/review-resume', upload.single('resume'), async (req, res) => {
         res.status(500).json({ error: 'Failed to review resume. Please try again.' });
     }
 });
+
+//ROUTE TO GET USER PROGRESS FOR DASHBOARD 
+app.get('/api/user/progress', authMiddleware, async (req, res) => {
+    try {
+        // Get the user's ID from our auth middleware
+        const userId = req.user.id;
+
+        //  Find all data linked to this user
+        const resumeReviews = await ResumeReview.find({ user: userId })
+            .sort({ createdAt: -1 }) // Sort by newest first
+            .limit(5); // Get the 5 most recent reviews
+
+        const chatSessions = await ChatSession.find({ user: userId })
+            .sort({ createdAt: -1 })
+            .limit(5); // Get the 5 most recent chats
+
+        // Fetch DSA submissions
+        const dsaSubmissions = await DsaSubmission.find({ user: userId })
+            .sort({ createdAt: -1 })
+            .limit(5); // Get the 5 most recent submissions
+        // Send the data back to the frontend
+        res.status(200).json({
+            resumeReviews,
+            chatSessions,
+            dsaSubmissions
+        });
+
+    } catch (error) {
+        console.error("Error fetching user progress:", error);
+        res.status(500).json({ message: "Server error fetching progress." });
+    }
+});
+
 // Start the Server
 app.listen(PORT, () => {
     console.log(`Server is listening on http://localhost:${PORT}`);

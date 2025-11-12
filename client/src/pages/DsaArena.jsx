@@ -16,8 +16,11 @@ import prettier from "prettier/standalone";
 import babel from 'prettier/plugins/babel';
 import estree from 'prettier/plugins/estree';
 import * as javaPlugin from "prettier-plugin-java";
+import { useAuth } from '../context/AuthContext';
+
 
 const DsaArena = () => {
+  const { token } = useAuth();
   // ---  Set up state to hold the code ---
   const [code, setCode] = useState(
     "function solve() {\n  // Your code here\n  console.log('Hello, PrepAI!');\n}"
@@ -76,7 +79,12 @@ const DsaArena = () => {
     setProblem(null);
     setFeedback(null);
     try {
-      const response = await axios.post('http://localhost:8000/api/generate-problem', { topic, difficulty });
+      const response = await axios.post('http://localhost:8000/api/generate-problem', { topic, difficulty }, {
+      // Added Authorization header with the token
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       setProblem(response.data);
     } catch (err) {
       const errorMessage = err.response ? err.response.data.error : 'An unexpected error occurred.';
@@ -100,6 +108,11 @@ const DsaArena = () => {
         problem,
         code,
         language,
+      }, {
+        //  Added Authorization header
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
       setFeedback(response.data);
     } catch (err) {
