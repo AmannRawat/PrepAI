@@ -108,6 +108,7 @@ const DsaArena = () => {
         problem,
         code,
         language,
+        topic,
       }, {
         //  Added Authorization header
         headers: {

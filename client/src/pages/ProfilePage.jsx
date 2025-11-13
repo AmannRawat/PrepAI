@@ -79,7 +79,8 @@ const ProfilePage = () => {
 
     // This counts the occurrences of each topic
     const topicCounts = progress.dsaSubmissions.reduce((acc, submission) => {
-      const topic = submission.problem?.title?.split(' ')[0] || 'Other'; // Simple way to guess topic
+      // const topic = submission.problem?.title?.split(' ')[0] || 'Other'; // Simple way to guess topic
+      const topic = submission.topic || 'Other';
       acc[topic] = (acc[topic] || 0) + 1;
       return acc;
     }, {});

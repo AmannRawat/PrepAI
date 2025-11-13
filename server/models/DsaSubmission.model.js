@@ -13,6 +13,11 @@ const dsaSubmissionSchema = new Schema({
         title: String,
         description: String,
     },
+    topic: {
+        type: String,
+        required: true,
+        default: 'General'
+    },
     // The user's code
     language: String,
     code: String,

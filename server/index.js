@@ -209,9 +209,9 @@ app.post('/api/generate-problem', authMiddleware, async (req, res) => {
 // New route for code evaluation 
 app.post('/api/evaluate-code', authMiddleware, async (req, res) => {
     try {
-        const { problem, code, language } = req.body;
+       const { problem, code, language, topic } = req.body;
 
-        if (!problem || !code || !language) {
+        if (!problem || !code || !language || !topic){
             return res.status(400).json({ error: 'Problem, code, and language are required.' });
         }
 
@@ -250,6 +250,7 @@ app.post('/api/evaluate-code', authMiddleware, async (req, res) => {
                 title: problem.title,
                 description: problem.description,
             },
+            topic: topic,
             language: language,
             code: code,
             feedback: parsedResponse // Save the AI's feedback
