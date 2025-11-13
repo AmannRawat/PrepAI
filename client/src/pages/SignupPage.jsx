@@ -1,14 +1,15 @@
-import  { useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const SignupPage = () => {
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(''); // To show a success message
-  
+
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -27,6 +28,7 @@ const SignupPage = () => {
     try {
       // Send the email and password to the signup backend
       const response = await axios.post('http://localhost:8000/api/auth/signup', {
+        name,
         email,
         password,
       });
@@ -56,8 +58,28 @@ const SignupPage = () => {
         </h1>
         <form className="space-y-6" onSubmit={handleSubmit}>
           <div>
-            <label 
-              htmlFor="email" 
+            <label
+              htmlFor="name"
+              className="block text-sm font-medium text-text-secondary"
+            >
+              Name
+            </label>
+            <input
+              id="name"
+              name="name"
+              type="text"
+              autoComplete="name"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="mt-1 block w-full px-3 py-2 bg-background border border-text-secondary/30 rounded-md text-text-primary placeholder-text-secondary focus:outline-none focus:ring-accent focus:border-accent"
+              placeholder="Your Full Name"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="email"
               className="block text-sm font-medium text-text-secondary"
             >
               Email Address
@@ -75,8 +97,8 @@ const SignupPage = () => {
             />
           </div>
           <div>
-            <label 
-              htmlFor="password" 
+            <label
+              htmlFor="password"
               className="block text-sm font-medium text-text-secondary"
             >
               Password (min. 6 characters)
@@ -113,8 +135,8 @@ const SignupPage = () => {
         </form>
         <p className="text-sm text-center text-text-secondary">
           Already have an account?{' '}
-          <Link 
-            to="/login" 
+          <Link
+            to="/login"
             className="font-medium text-accent hover:text-accent-darker"
           >
             Log in here

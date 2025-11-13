@@ -5,7 +5,7 @@ import { Loader2 } from 'lucide-react'; // For loading spinner
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'; // For data visualization (charting components)
 
 const ProfilePage = () => {
-  const { userEmail, token } = useAuth();
+  const { userEmail, token,userName } = useAuth();
   const [progress, setProgress] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -107,7 +107,7 @@ const ProfilePage = () => {
     <div className="flex flex-col flex-1 h-full">
       <header className="mb-6">
         <h1 className="text-3xl font-bold text-text-primary">User Profile</h1>
-        <p className="text-text-secondary">Welcome, {userEmail}</p>
+        <p className="text-text-secondary">Welcome, {userName || userEmail}</p>
       </header>
 
       {/* Main Content Area */}
@@ -129,7 +129,7 @@ const ProfilePage = () => {
         {/* Recent Activity (once loaded) */}
         {progress && (
           <>
-          <div className="bg-surface/70 p-6 rounded-lg">
+            <div className="bg-surface/70 p-6 rounded-lg">
               <h2 className="text-xl font-semibold text-text-primary mb-4">DSA Topic Breakdown</h2>
               {dsaTopicData.length > 0 ? (
                 <DsaTopicChart data={dsaTopicData} />
@@ -146,7 +146,12 @@ const ProfilePage = () => {
                   {progress.dsaSubmissions.map((sub) => (
                     <li key={sub._id} className="p-4 bg-background/50 rounded-md border border-text-secondary/20">
                       <p className="font-semibold text-text-primary">{sub.problem?.title || 'DSA Problem'}</p>
-                      <p className={`text-sm font-medium ${sub.feedback?.correctness?.includes('Incorrect') ? 'text-red-400' : 'text-green-400'}`}>
+                      <p className={`text-sm font-medium ${(sub.feedback?.correctness?.includes('Incorrect') || sub.feedback?.correctness?.includes('not correctly') || sub.feedback?.correctness?.includes('incomplete'))
+                          ? 'text-red-400' // Set to red if it's clearly wrong or incomplete
+                          : (sub.feedback?.correctness?.includes('Correct') || sub.feedback?.correctness?.includes('correctly solves'))
+                            ? 'text-green-400' // Set to green only if it's clearly correct
+                            : 'text-yellow-400' // Default to yellow for partial/unclear
+                        }`}>
                         {sub.feedback?.correctness}
                       </p>
                       <p className="text-xs text-text-secondary mt-1">Submitted on: {formatDate(sub.createdAt)}</p>
@@ -166,7 +171,7 @@ const ProfilePage = () => {
                     <li key={review._id} className="p-4 bg-background/50 rounded-md border border-text-secondary/20">
                       <p className="font-semibold text-accent">ATS Score: {review.atsAssessment?.estimatedScore || 'N/A'} / 100</p>
                       <p className="text-sm text-text-secondary mt-1">Reviewed on: {formatDate(review.createdAt)}</p>
-                      <p className="text-sm text-text-secondary mt-2">"{review.strengths.substring(0, 100)}..."</p>
+                      <p className="text-sm text-text-secondary mt-2">"{review.strengths[0].substring(0, 100)}..."</p>
                     </li>
                   ))}
                 </ul>

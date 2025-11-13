@@ -11,6 +11,7 @@ export const AuthProvider = ({ children }) => {
     const [token, setToken] = useState(localStorage.getItem('token'));
     const [userEmail, setUserEmail] = useState(localStorage.getItem('userEmail'));
     const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('token'));
+    const [userName, setUserName] = useState(localStorage.getItem('userName'));
     // const navigate = useNavigate();
 
     // Login function
@@ -18,10 +19,11 @@ export const AuthProvider = ({ children }) => {
         // Saves data to localStorage
         localStorage.setItem('token', data.token);
         localStorage.setItem('userEmail', data.email);
-        
+        localStorage.setItem('userName', data.name);
         // Update the state
         setToken(data.token);
         setUserEmail(data.email);
+        setUserName(data.name);
         setIsLoggedIn(true);
 
         // Redirect to the dashboard
@@ -33,10 +35,12 @@ export const AuthProvider = ({ children }) => {
         // Clear data from localStorage
         localStorage.removeItem('token');
         localStorage.removeItem('userEmail');
+        localStorage.removeItem('userName');
 
         // Reset the state
         setToken(null);
         setUserEmail(null);
+        setUserName(null);
         setIsLoggedIn(false);
 
         // Redirects to the login page
@@ -48,6 +52,7 @@ export const AuthProvider = ({ children }) => {
         isLoggedIn,
         token,
         userEmail,
+        userName,
         login,
         logout
     };

@@ -78,11 +78,11 @@ app.get('/', (req, res) => {
 app.post('/api/auth/signup', async (req, res) => {
     try {
         // Get email and password from the request body
-        const { email, password } = req.body;
+        const { name,email, password } = req.body;
 
         // Checks for missing fields
-        if (!email || !password) {
-            return res.status(400).json({ message: 'Please provide email and password.' });
+       if (!name || !email || !password) {
+            return res.status(400).json({ message: 'Please provide name, email, and password.' });
         }
 
         // Checks if user already exists
@@ -94,6 +94,7 @@ app.post('/api/auth/signup', async (req, res) => {
         // Creats the new user
         // Note: The password will be automatically hashed by the 'pre-save' hook in User.model.js
         const user = await User.create({
+            name,
             email,
             password
         });
@@ -139,7 +140,8 @@ app.post('/api/auth/login', async (req, res) => {
         const payload = {
             user: {
                 id: user._id,
-                email: user.email
+                email: user.email,
+                name: user.name 
             }
         };
 
@@ -154,7 +156,8 @@ app.post('/api/auth/login', async (req, res) => {
             message: 'Login successful!',
             token,
             userId: user._id,
-            email: user.email
+            email: user.email,
+            name: user.name
         });
 
     } catch (error) {

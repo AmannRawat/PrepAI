@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { Home, Code, MessageSquare, FileText,User, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 const Sidebar = () => {
-  const { logout, userEmail } = useAuth();
+  const { logout, userEmail,userName } = useAuth();
   // A helper function for NavLink's className to apply styles for active links
   const getNavLinkClass = ({ isActive }) => {
     return isActive
@@ -43,11 +43,11 @@ const Sidebar = () => {
             <div className="w-10 h-10 bg-text-secondary/50 rounded-full mr-4 flex items-center justify-center">
               <User size={20} className="text-text-primary" />
             </div>
-            {/* <span className="truncate">{userEmail || 'User Profile'}</span> */}
-            <span className="truncate">User Profile</span>
+            <span className="truncate">{userName || 'User Profile'}</span>
+            {/* <span className="truncate">User Profile</span> */}
         </NavLink>
 
-        {/* New Logout Button */}
+        {/* Logout Button */}
         <button 
           onClick={logout} 
           className="flex items-center p-3 rounded-lg hover:bg-surface transition-colors duration-200 w-full mt-2"

@@ -13,8 +13,8 @@ const reviewSchema = new Schema({
         estimatedScore: String,
         explanation: String
     },
-    strengths: String,
-    areasForImprovement: String,
+    strengths: [String],
+    areasForImprovement: [String],
     actionVerbSuggestions: String,
     quantificationSuggestions: String
 }, {

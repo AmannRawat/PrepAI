@@ -94,7 +94,7 @@ const DsaArena = () => {
     }
   };
 
-  //  Create the function to handle code submission
+  //  function to handle code submission
   const handleCodeSubmission = async () => {
     if (!problem) {
       setEvaluationError("Please generate a problem first.");
