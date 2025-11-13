@@ -1,14 +1,46 @@
-// client/src/pages/ProfilePage.jsx
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import { Loader2 } from 'lucide-react'; // For loading spinner
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'; // For data visualization (charting components)
 
 const ProfilePage = () => {
   const { userEmail, token } = useAuth();
   const [progress, setProgress] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Defining helper component inside the same file for simplicity.
+  const DsaTopicChart = ({ data }) => {
+    // Define colors for our chart
+    const COLORS = ['#ffc554', '#E64833', '#00ff7f', '#8884d8', '#82ca9d'];
+
+    return (
+      <div style={{ width: '100%', height: 300 }}>
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="50%"
+              labelLine={false}
+              outerRadius={100}
+              fill="#8884d8"
+              dataKey="value" // The 'value' key from our processed data
+              nameKey="name" // The 'name' key (e.g., "Arrays")
+              label={(entry) => `${entry.name} (${entry.value})`} // Show name and count
+            >
+              {data.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip />
+            <Legend />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  };
 
   // This useEffect runs once when the component loads
   useEffect(() => {
@@ -20,13 +52,13 @@ const ProfilePage = () => {
       }
 
       try {
-        // 1. Fetch data from our new protected endpoint
+        // Fetch data from our new protected endpoint
         const response = await axios.get('http://localhost:8000/api/user/progress', {
           headers: {
             'Authorization': `Bearer ${token}`
           }
         });
-        setProgress(response.data); // Save the { resumeReviews, chatSessions } object
+        setProgress(response.data); // Save the { resumeReviews, chatSessions, dataSubmision } object
       } catch (err) {
         console.error("Error fetching progress:", err);
         setError("Failed to load progress. Please try again.");
@@ -37,6 +69,28 @@ const ProfilePage = () => {
 
     fetchProgress();
   }, [token]); // Re-run if the token changes
+
+  //Process DSA data for our chart
+  // useMemo ensures this calculation only re-runs when 'progress' changes
+  const dsaTopicData = useMemo(() => {
+    if (!progress || !progress.dsaSubmissions) {
+      return [];
+    }
+
+    // This counts the occurrences of each topic
+    const topicCounts = progress.dsaSubmissions.reduce((acc, submission) => {
+      const topic = submission.problem?.title?.split(' ')[0] || 'Other'; // Simple way to guess topic
+      acc[topic] = (acc[topic] || 0) + 1;
+      return acc;
+    }, {});
+
+    // Convert the counts object into an array for Recharts
+    // From { Arrays: 2, Strings: 1 } to [{ name: 'Arrays', value: 2 }, { name: 'Strings', value: 1 }]
+    return Object.keys(topicCounts).map(key => ({
+      name: key,
+      value: topicCounts[key],
+    }));
+  }, [progress]);
 
   // Helper function to format the date
   const formatDate = (dateString) => {
@@ -55,8 +109,8 @@ const ProfilePage = () => {
         <h1 className="text-3xl font-bold text-text-primary">User Profile</h1>
         <p className="text-text-secondary">Welcome, {userEmail}</p>
       </header>
-      
-      {/* --- Main Content Area --- */}
+
+      {/* Main Content Area */}
       <div className="space-y-8">
 
         {/* Loading and Error States */}
@@ -75,6 +129,34 @@ const ProfilePage = () => {
         {/* Recent Activity (once loaded) */}
         {progress && (
           <>
+          <div className="bg-surface/70 p-6 rounded-lg">
+              <h2 className="text-xl font-semibold text-text-primary mb-4">DSA Topic Breakdown</h2>
+              {dsaTopicData.length > 0 ? (
+                <DsaTopicChart data={dsaTopicData} />
+              ) : (
+                <p className="text-text-secondary">Submit some DSA problems to see your progress chart!</p>
+              )}
+            </div>
+            {/*Recent DSA Submissions Section */}
+            <div className="bg-surface/70 p-6 rounded-lg">
+              <h2 className="text-xl font-semibold text-text-primary mb-4">Recent DSA Submissions</h2>
+              {/* Check if the new dsaSubmissions array exists and has items */}
+              {progress.dsaSubmissions && progress.dsaSubmissions.length > 0 ? (
+                <ul className="space-y-3">
+                  {progress.dsaSubmissions.map((sub) => (
+                    <li key={sub._id} className="p-4 bg-background/50 rounded-md border border-text-secondary/20">
+                      <p className="font-semibold text-text-primary">{sub.problem?.title || 'DSA Problem'}</p>
+                      <p className={`text-sm font-medium ${sub.feedback?.correctness?.includes('Incorrect') ? 'text-red-400' : 'text-green-400'}`}>
+                        {sub.feedback?.correctness}
+                      </p>
+                      <p className="text-xs text-text-secondary mt-1">Submitted on: {formatDate(sub.createdAt)}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-text-secondary">No DSA submissions found. Try the DSA Arena!</p>
+              )}
+            </div>
             {/* Recent Resume Reviews */}
             <div className="bg-surface/70 p-6 rounded-lg">
               <h2 className="text-xl font-semibold text-text-primary mb-4">Recent Resume Reviews</h2>
