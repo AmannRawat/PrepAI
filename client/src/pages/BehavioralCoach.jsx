@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, LogOut, RefreshCw } from 'lucide-react'; // A nice icon for the send button
+import { Send, LogOut, RefreshCw, Mic } from 'lucide-react';// A nice icon for the send button
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 
@@ -15,6 +15,8 @@ const BehavioralCoach = () => {
   const [isSessionOver, setIsSessionOver] = useState(false);
   // A ref to the message container to auto-scroll to the bottom
   const messagesEndRef = useRef(null);
+  const [voices, setVoices] = useState([]);
+  const [selectedVoiceName, setSelectedVoiceName] = useState('');
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -23,20 +25,43 @@ const BehavioralCoach = () => {
     scrollToBottom();
   }, [messages]);
 
+  //  Helper function to make the browser speak ---
+  const speak = (text) => {
+    // Stop any speaking that is already in progress
+    window.speechSynthesis.cancel();
+
+    // Create a new speech "utterance"
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.9; // Slightly slower for clarity
+
+    // Tell the browser to speak it
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Speak the initial message when the component loads ---
+  useEffect(() => {
+    speak(initialMessage.text);
+  }, []); // The empty array [] means this runs only once on mount
+
   const startNewInterview = () => {
+    window.speechSynthesis.cancel(); // Stop speaking
     setMessages([initialMessage]);
     setIsSessionOver(false);
+    speak(initialMessage.text); // Speak the new greeting
   };
 
   // Function to handle the form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
+    window.speechSynthesis.cancel();
     sendMessage(input); // Use a shared send message function
   };
 
   // Create a handler for the "End Interview" button
   const handleEndInterview = () => {
+    window.speechSynthesis.cancel(); // Stop speaking
     // Send our special action message to the backend
     sendMessage("USER_ACTION: End interview");
   };
@@ -55,7 +80,7 @@ const BehavioralCoach = () => {
     setIsLoading(true);
 
     try {
-      // 2. Call the real backend API with the new chat history
+      // Call the real backend API with the new chat history
       const response = await axios.post('http://localhost:8000/api/behavioral-chat', {
         messages: newMessageHistory,
       }, {
@@ -70,9 +95,11 @@ const BehavioralCoach = () => {
         aiText = aiText.replace("[SESSION_END]", "").trim(); // Clean the token from the text
         setIsSessionOver(true); // Set the session to over
       }
+      speak(aiText);
       const aiResponse = { sender: 'ai', text: aiText };
 
       //  Add the AI's response to the history
+      // speak(errorResponse.text);
       setMessages(prev => [...prev, aiResponse]);
 
     } catch (err) {
@@ -85,6 +112,7 @@ const BehavioralCoach = () => {
       } else {
         errorResponse = { sender: 'ai', text: "Sorry, I'm having trouble connecting. Please try again." };
       }
+      speak(errorResponse.text);
       setMessages(prev => [...prev, errorResponse]);
     } finally {
       // Stop the loading indicator

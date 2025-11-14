@@ -2,8 +2,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import { Loader2 } from 'lucide-react'; // For loading spinner
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'; // For data visualization (charting components)
-
+import { 
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,  
+  LineChart, Line, XAxis, YAxis, CartesianGrid // For data visualization (charting components)
+} from 'recharts';
 const ProfilePage = () => {
   const { userEmail, token,userName } = useAuth();
   const [progress, setProgress] = useState(null);
@@ -42,6 +44,34 @@ const ProfilePage = () => {
     );
   };
 
+  const ResumeScoreChart = ({ data }) => {
+  return (
+    <div style={{ width: '100%', height: 300 }}>
+      <ResponsiveContainer>
+        <LineChart
+          data={data}
+          margin={{ top: 5, right: 30, left: 0, bottom: 5 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+          <XAxis dataKey="name" strokeOpacity={0.8} />
+          <YAxis domain={[0, 100]} strokeOpacity={0.8} />
+          <Tooltip 
+            contentStyle={{ backgroundColor: 'var(--color-surface)', border: 'none', borderRadius: '8px' }} 
+            itemStyle={{ color: 'var(--color-text-primary)' }} 
+          />
+          <Legend />
+          <Line 
+            type="monotone" 
+            dataKey="score" 
+            stroke="var(--color-accent)" // Use our theme's accent color
+            strokeWidth={2} 
+            activeDot={{ r: 8 }} 
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
   // This useEffect runs once when the component loads
   useEffect(() => {
     const fetchProgress = async () => {
@@ -93,6 +123,19 @@ const ProfilePage = () => {
     }));
   }, [progress]);
 
+  const resumeScoreData = useMemo(() => {
+    if (!progress || !progress.resumeReviews || progress.resumeReviews.length === 0) {
+      return [];
+    }
+    // We want the oldest scores first, so we reverse the array
+    return progress.resumeReviews
+      .map((review, index) => ({
+        name: `Review ${index + 1}`,
+        score: parseInt(review.atsAssessment?.estimatedScore, 10) || 0,
+        date: new Date(review.createdAt).toLocaleDateString(),
+      }))
+      .reverse(); // Show progression from left to right
+  }, [progress]);
   // Helper function to format the date
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleString('en-US', {
@@ -130,14 +173,35 @@ const ProfilePage = () => {
         {/* Recent Activity (once loaded) */}
         {progress && (
           <>
-            <div className="bg-surface/70 p-6 rounded-lg">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* DSA Topic Breakdown */}
+              <div className="bg-surface/70 p-6 rounded-lg">
+                <h2 className="text-xl font-semibold text-text-primary mb-4">DSA Topic Breakdown</h2>
+                {dsaTopicData.length > 0 ? (
+                  <DsaTopicChart data={dsaTopicData} />
+                ) : (
+                  <p className="text-text-secondary h-[300px] flex items-center justify-center">Submit some DSA problems to see your progress chart!</p>
+                )}
+              </div>
+              
+              {/* ATS Score Progress */}
+              <div className="bg-surface/70 p-6 rounded-lg">
+                <h2 className="text-xl font-semibold text-text-primary mb-4">ATS Score Progress</h2>
+                {resumeScoreData.length > 0 ? (
+                  <ResumeScoreChart data={resumeScoreData} />
+                ) : (
+                  <p className="text-text-secondary h-[300px] flex items-center justify-center">Review your resume to track your score!</p>
+                )}
+              </div>
+            </div>
+            {/* <div className="bg-surface/70 p-6 rounded-lg">
               <h2 className="text-xl font-semibold text-text-primary mb-4">DSA Topic Breakdown</h2>
               {dsaTopicData.length > 0 ? (
                 <DsaTopicChart data={dsaTopicData} />
               ) : (
                 <p className="text-text-secondary">Submit some DSA problems to see your progress chart!</p>
               )}
-            </div>
+            </div> */}
             {/*Recent DSA Submissions Section */}
             <div className="bg-surface/70 p-6 rounded-lg">
               <h2 className="text-xl font-semibold text-text-primary mb-4">Recent DSA Submissions</h2>
