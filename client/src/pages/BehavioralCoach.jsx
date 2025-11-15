@@ -17,32 +17,74 @@ const BehavioralCoach = () => {
   const messagesEndRef = useRef(null);
   const [voices, setVoices] = useState([]);
   const [selectedVoiceName, setSelectedVoiceName] = useState('');
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  //  Helper function to make the browser speak ---
-  const speak = (text) => {
-    // Stop any speaking that is already in progress
-    window.speechSynthesis.cancel();
-
-    // Create a new speech "utterance"
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.9; // Slightly slower for clarity
-
-    // Tell the browser to speak it
-    window.speechSynthesis.speak(utterance);
-  };
 
   // Speak the initial message when the component loads ---
   useEffect(() => {
     speak(initialMessage.text);
   }, []); // The empty array [] means this runs only once on mount
+
+  useEffect(() => {
+    const loadVoices = () => {
+      const allVoices = window.speechSynthesis.getVoices();
+      setVoices(allVoices);
+
+      // Try to find a high-quality default voice
+      const premiumVoice = allVoices.find(
+        (voice) => (voice.name.includes('Google') || voice.name.includes('Microsoft')) && voice.lang.includes('en-US')
+      );
+
+      if (premiumVoice) {
+        setSelectedVoiceName(premiumVoice.name);
+      } else {
+        // Find the first available US English voice
+        const defaultVoice = allVoices.find((voice) => voice.lang === 'en-US');
+        if (defaultVoice) {
+          setSelectedVoiceName(defaultVoice.name);
+        }
+      }
+    };
+
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
+
+  //  Helper function to make the browser speak ---
+  const speak = (text) => {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+
+    // Find the voice object that matches the selected name
+    const selectedVoice = voices.find(voice => voice.name === selectedVoiceName);
+
+    if (selectedVoice) {
+      utterance.voice = selectedVoice; // Use the user's selected voice
+    } else {
+      utterance.lang = 'en-US'; // Fallback
+    }
+
+    utterance.rate = 0.9;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Speak the initial message (only once voices are loaded)
+  useEffect(() => {
+    if (voices.length > 0 && messages.length === 1) { // Only speak if voices are loaded and it's the first message
+      speak(initialMessage.text);
+    }
+  }, [voices]); // Run when voices are ready
+
+
+  // Auto-scroll to the bottom when messages change
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const startNewInterview = () => {
     window.speechSynthesis.cancel(); // Stop speaking
@@ -124,7 +166,31 @@ const BehavioralCoach = () => {
     <div className="flex flex-col flex-1 h-full p-4 bg-surface/70 rounded-lg border border-text-secondary/20">
       <header className="mb-4">
         <h1 className="text-3xl font-bold text-text-primary">Behavioral Coach</h1>
-        <p className="text-text-secondary">Practice common behavioral questions with your AI interviewer.</p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-text-secondary">Practice common behavioral questions with your AI interviewer.</p>
+          
+          {/* --- The New Dropdown --- */}
+          <div className="flex items-center gap-2 mt-2 sm:mt-0">
+            <Mic size={18} className="text-text-secondary" />
+            <select
+              value={selectedVoiceName}
+              onChange={(e) => setSelectedVoiceName(e.target.value)}
+              className="bg-surface text-text-primary rounded px-2 py-1 border border-text-secondary/30 focus:outline-none focus:ring-1 focus:ring-accent text-sm"
+            >
+              <option value="">-- Select a Voice --</option>
+              {voices
+                .filter(voice => voice.lang.includes('en-')) // Only show English voices
+                .map(voice => (
+                  <option key={voice.name} value={voice.name}>
+                    {voice.name} ({voice.lang})
+                  </option>
+                ))
+              }
+            </select>
+          </div>
+          {/* --- End New Dropdown --- */}
+
+        </div>
       </header>
 
       {/* Message Display Area */}
