@@ -3,7 +3,7 @@
 .env
 *.env
 *.log
-
+build
 # ========== Logs ==========
 logs
 npm-debug.log*
