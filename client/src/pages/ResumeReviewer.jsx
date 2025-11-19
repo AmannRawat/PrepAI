@@ -49,6 +49,13 @@ const ResumeReviewer = () => {
         },
       });
       setFeedback(response.data); // Store the AI's feedback object
+      //  Record this activity for the daily streak 
+      axios.post('http://localhost:8000/api/user/record-activity', {}, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).catch(err => {
+        console.error("Failed to record activity:", err);
+      });
+
     } catch (err) {
       const errorMessage = err.response ? err.response.data.error : 'An unexpected error occurred.';
       // If token is invalid, the backend will send a 401 error

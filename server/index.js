@@ -78,10 +78,10 @@ app.get('/', (req, res) => {
 app.post('/api/auth/signup', async (req, res) => {
     try {
         // Get email and password from the request body
-        const { name,email, password } = req.body;
+        const { name, email, password } = req.body;
 
         // Checks for missing fields
-       if (!name || !email || !password) {
+        if (!name || !email || !password) {
             return res.status(400).json({ message: 'Please provide name, email, and password.' });
         }
 
@@ -141,7 +141,7 @@ app.post('/api/auth/login', async (req, res) => {
             user: {
                 id: user._id,
                 email: user.email,
-                name: user.name 
+                name: user.name
             }
         };
 
@@ -209,9 +209,9 @@ app.post('/api/generate-problem', authMiddleware, async (req, res) => {
 // New route for code evaluation 
 app.post('/api/evaluate-code', authMiddleware, async (req, res) => {
     try {
-       const { problem, code, language, topic } = req.body;
+        const { problem, code, language, topic } = req.body;
 
-        if (!problem || !code || !language || !topic){
+        if (!problem || !code || !language || !topic) {
             return res.status(400).json({ error: 'Problem, code, and language are required.' });
         }
 
@@ -394,7 +394,7 @@ app.get('/api/user/progress', authMiddleware, async (req, res) => {
     try {
         // Get the user's ID from our auth middleware
         const userId = req.user.id;
-
+        const user = await User.findById(userId);
         //  Find all data linked to this user
         const resumeReviews = await ResumeReview.find({ user: userId })
             .sort({ createdAt: -1 }) // Sort by newest first
@@ -412,12 +412,69 @@ app.get('/api/user/progress', authMiddleware, async (req, res) => {
         res.status(200).json({
             resumeReviews,
             chatSessions,
-            dsaSubmissions
+            dsaSubmissions,
+            currentStreak: user ? user.currentStreak : 0
         });
 
     } catch (error) {
         console.error("Error fetching user progress:", error);
         res.status(500).json({ message: "Server error fetching progress." });
+    }
+});
+
+// ROUTE TO RECORD USER ACTIVITY AND UPDATE STREAK
+app.post('/api/user/record-activity', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Find the user
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
+        //  Streak Logic 
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Normalize to the start of the day (midnight)
+
+        let lastActivity = user.lastActivityDate;
+        let streak = user.currentStreak || 0;
+
+        if (lastActivity) {
+            lastActivity = new Date(lastActivity);
+            lastActivity.setHours(0, 0, 0, 0); // Normalize last activity date
+
+            const oneDay = 1000 * 60 * 60 * 24; // Milliseconds in a day
+            const diff = today.getTime() - lastActivity.getTime();
+
+            if (diff === 0) {
+                if (streak === 0) {
+                    streak = 1;
+                }
+                // Already did an activity today. Do nothing.
+            } else if (diff === oneDay) {
+                // Activity was yesterday. Increment streak!
+                streak++;
+            } else {
+                // Missed a day (or more). Reset streak to 1.
+                streak = 1;
+            }
+        } else {
+            // First activity ever. Start streak at 1.
+            streak = 1;
+        }
+
+        // Update the user in the database
+        user.currentStreak = streak;
+        user.lastActivityDate = new Date(); // Set to *now*
+        await user.save();
+
+        // Send back the new streak count
+        res.status(200).json({ currentStreak: user.currentStreak });
+
+    } catch (error) {
+        console.error("Error recording activity:", error);
+        res.status(500).json({ message: "Server error recording activity." });
     }
 });
 

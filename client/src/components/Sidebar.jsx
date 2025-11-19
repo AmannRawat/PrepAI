@@ -1,9 +1,28 @@
-// import React from 'react';
+import axios from 'axios';
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Home, Code, MessageSquare, FileText,User, LogOut } from 'lucide-react';
+import { Home, Code, MessageSquare, FileText, User, LogOut, Flame } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 const Sidebar = () => {
-  const { logout, userEmail,userName } = useAuth();
+  const [streak, setStreak] = useState(0);
+  const { logout, userEmail,userName ,token} = useAuth();
+
+// Fetch streak when sidebar loads
+  useEffect(() => {
+    const fetchStreak = async () => {
+      if (!token) return;
+      try {
+        const response = await axios.get('http://localhost:8000/api/user/progress', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        setStreak(response.data.currentStreak || 0);
+      } catch (error) {
+        console.error("Error fetching streak:", error);
+      }
+    };
+    fetchStreak();
+  }, [token]);
+
   // A helper function for NavLink's className to apply styles for active links
   const getNavLinkClass = ({ isActive }) => {
     return isActive
@@ -17,6 +36,19 @@ const Sidebar = () => {
         <span className="text-2xl font-bold text-accent font-mono">PrepAI</span>
       </div>
       
+      {/* Streak Counter Section
+      <div className="mb-6 bg-gradient-to-r from-orange-500/10 to-red-500/10 border border-orange-500/20 p-3 rounded-xl flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="bg-orange-500/20 p-1.5 rounded-lg">
+            <Flame size={20} className="text-orange-500 fill-orange-500" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs text-text-secondary font-semibold uppercase tracking-wider">Day Streak</span>
+            <span className="text-lg font-bold text-text-primary leading-none">{streak}</span>
+          </div>
+        </div>
+      </div> */}
+
       <nav className="flex flex-col space-y-4">
         <NavLink to="/" className={getNavLinkClass}>
           <Home className="mr-4" />

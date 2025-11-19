@@ -18,6 +18,7 @@
     "@uiw/codemirror-theme-okaidia": "^4.25.1",
     "@uiw/react-codemirror": "^4.25.1",
     "axios": "^1.11.0",
+    "framer-motion": "^12.23.24",
     "lucide-react": "^0.539.0",
     "prettier": "^3.6.2",
     "prettier-plugin-java": "^2.7.4",

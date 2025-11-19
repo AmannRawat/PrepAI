@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, LogOut, RefreshCw, Mic } from 'lucide-react';// A nice icon for the send button
+import { Send, LogOut, RefreshCw, Mic, Volume2, VolumeX } from 'lucide-react';// A nice icon for the send button
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 
@@ -17,16 +17,20 @@ const BehavioralCoach = () => {
   const messagesEndRef = useRef(null);
   const [voices, setVoices] = useState([]);
   const [selectedVoiceName, setSelectedVoiceName] = useState('');
-
-  // Speak the initial message when the component loads ---
+  const [activityRecorded, setActivityRecorded] = useState(false);
+  const [isTtsEnabled, setIsTtsEnabled] = useState(() => {
+    const saved = localStorage.getItem('isTtsEnabled');
+    return saved !== null ? JSON.parse(saved) : true; // Default to true if not saved
+  });
   useEffect(() => {
-    speak(initialMessage.text);
-  }, []); // The empty array [] means this runs only once on mount
+    localStorage.setItem('isTtsEnabled', JSON.stringify(isTtsEnabled));
+  }, [isTtsEnabled]);
 
   useEffect(() => {
     const loadVoices = () => {
       const allVoices = window.speechSynthesis.getVoices();
-      setVoices(allVoices);
+      const englishVoices = allVoices.filter(voice => voice.lang.includes('en-'));
+      setVoices(englishVoices);
 
       // Try to find a high-quality default voice
       const premiumVoice = allVoices.find(
@@ -35,15 +39,12 @@ const BehavioralCoach = () => {
 
       if (premiumVoice) {
         setSelectedVoiceName(premiumVoice.name);
-      } else {
+      } else if (englishVoices.length > 0) {
         // Find the first available US English voice
-        const defaultVoice = allVoices.find((voice) => voice.lang === 'en-US');
-        if (defaultVoice) {
-          setSelectedVoiceName(defaultVoice.name);
-        }
+        const defaultVoice = englishVoices.find((voice) => voice.lang === 'en-US');
+        setSelectedVoiceName(defaultVoice ? defaultVoice.name : englishVoices[0].name);
       }
     };
-
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
 
@@ -54,6 +55,7 @@ const BehavioralCoach = () => {
 
   //  Helper function to make the browser speak ---
   const speak = (text) => {
+    if (!isTtsEnabled) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
 
@@ -70,40 +72,46 @@ const BehavioralCoach = () => {
     window.speechSynthesis.speak(utterance);
   };
 
-  // Speak the initial message (only once voices are loaded)
-  useEffect(() => {
-    if (voices.length > 0 && messages.length === 1) { // Only speak if voices are loaded and it's the first message
-      speak(initialMessage.text);
-    }
-  }, [voices]); // Run when voices are ready
+  // // Speak the initial message (only once voices are loaded)
+  // useEffect(() => {
+  //   if (voices.length > 0 && messages.length === 1) { // Only speak if voices are loaded and it's the first message
+  //     speak(initialMessage.text);
+  //   }
+  // }, [voices, isTtsEnabled]); // Run when voices are ready
 
 
   // Auto-scroll to the bottom when messages change
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
+  //  Update functions to cancel speech (prevents sound bugs)
+  const stopSpeaking = () => {
+    window.speechSynthesis.cancel();
+  }
   const startNewInterview = () => {
-    window.speechSynthesis.cancel(); // Stop speaking
+    stopSpeaking()// Stop speaking
     setMessages([initialMessage]);
     setIsSessionOver(false);
     speak(initialMessage.text); // Speak the new greeting
+    setActivityRecorded(false);
   };
 
   // Function to handle the form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
-    window.speechSynthesis.cancel();
+    stopSpeaking();
     sendMessage(input); // Use a shared send message function
   };
 
   // Create a handler for the "End Interview" button
   const handleEndInterview = () => {
-    window.speechSynthesis.cancel(); // Stop speaking
+    stopSpeaking(); // Stop speaking
     // Send our special action message to the backend
     sendMessage("USER_ACTION: End interview");
   };
@@ -144,6 +152,17 @@ const BehavioralCoach = () => {
       // speak(errorResponse.text);
       setMessages(prev => [...prev, aiResponse]);
 
+      // Record this activity for the daily streak
+      // We only do this ONCE per session, on the first successful message
+      if (!activityRecorded && messageText !== "USER_ACTION: End interview") {
+        axios.post('http://localhost:8000/api/user/record-activity', {}, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }).then(() => {
+          setActivityRecorded(true); // Mark as recorded for this session
+        }).catch(err => {
+          console.error("Failed to record activity:", err);
+        });
+      }
     } catch (err) {
       //  Add better error handling for auth 
       console.error("Error fetching AI response:", err);
@@ -164,31 +183,46 @@ const BehavioralCoach = () => {
 
   return (
     <div className="flex flex-col flex-1 h-full p-4 bg-surface/70 rounded-lg border border-text-secondary/20">
+      {/* // <div className="flex flex-col flex-1 h-full p-4 pt-12 bg-surface/70 rounded-lg border border-text-secondary/20"> */}
       <header className="mb-4">
         <h1 className="text-3xl font-bold text-text-primary">Behavioral Coach</h1>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
           <p className="text-text-secondary">Practice common behavioral questions with your AI interviewer.</p>
-          
+
           {/* --- The New Dropdown --- */}
-          <div className="flex items-center gap-2 mt-2 sm:mt-0">
-            <Mic size={18} className="text-text-secondary" />
-            <select
-              value={selectedVoiceName}
-              onChange={(e) => setSelectedVoiceName(e.target.value)}
-              className="bg-surface text-text-primary rounded px-2 py-1 border border-text-secondary/30 focus:outline-none focus:ring-1 focus:ring-accent text-sm"
-            >
-              <option value="">-- Select a Voice --</option>
-              {voices
-                .filter(voice => voice.lang.includes('en-')) // Only show English voices
-                .map(voice => (
+          <div className="flex items-center gap-4 mt-2 sm:mt-0">
+            {/* Voice Selector Dropdown (unchanged) */}
+            <div className="flex items-center gap-2">
+              <Mic size={18} className="text-text-secondary" />
+              <select
+                value={selectedVoiceName}
+                onChange={(e) => setSelectedVoiceName(e.target.value)}
+                className="bg-surface text-text-primary rounded px-2 py-1 border border-text-secondary/30 focus:outline-none focus:ring-1 focus:ring-accent text-sm"
+              >
+                {/* Added the mapping logic to create the options*/}
+                <option value="">-- Select a Voice --</option>
+                {voices.map(voice => (
                   <option key={voice.name} value={voice.name}>
                     {voice.name} ({voice.lang})
                   </option>
-                ))
-              }
-            </select>
+                ))}
+              </select>
+            </div>
+
+            {/* New Toggle Button */}
+            <button
+              onClick={() => {
+                setIsTtsEnabled(!isTtsEnabled);
+                if (isTtsEnabled) { // If it's currently on, stop speaking
+                  stopSpeaking();
+                }
+              }}
+              title={isTtsEnabled ? "Mute Voice" : "Unmute Voice"}
+              className="p-2 rounded-lg border border-text-secondary/30 text-text-secondary hover:text-text-primary"
+            >
+              {isTtsEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            </button>
           </div>
-          {/* --- End New Dropdown --- */}
 
         </div>
       </header>

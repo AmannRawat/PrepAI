@@ -17,10 +17,11 @@ import babel from 'prettier/plugins/babel';
 import estree from 'prettier/plugins/estree';
 import * as javaPlugin from "prettier-plugin-java";
 import { useAuth } from '../context/AuthContext';
+import { CheckCircle, AlertCircle, AlertTriangle } from 'lucide-react';
 
 
 const DsaArena = () => {
-  const { token } = useAuth();
+  const { token, refreshUserData } = useAuth();
   // ---  Set up state to hold the code ---
   const [code, setCode] = useState(
     "function solve() {\n  // Your code here\n  console.log('Hello, PrepAI!');\n}"
@@ -80,7 +81,7 @@ const DsaArena = () => {
     setFeedback(null);
     try {
       const response = await axios.post('http://localhost:8000/api/generate-problem', { topic, difficulty }, {
-      // Added Authorization header with the token
+        // Added Authorization header with the token
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -116,6 +117,20 @@ const DsaArena = () => {
         }
       });
       setFeedback(response.data);
+
+      //  Record this activity for the daily streak 
+      // We do this *after* the submission is successful.
+      // We don't need to 'await' it, we can just "fire and forget"
+      axios.post('http://localhost:8000/api/user/record-activity', {}, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).then(() => {
+        // Update the streak UI immediately
+        refreshUserData();
+      }).catch(err => {
+        // If this fails, it's not critical. Log it, but don't bother the user.
+        console.error("Failed to record activity:", err);
+      });
+
     } catch (err) {
       const errorMessage = err.response ? err.response.data.error : 'An unexpected error occurred.';
       setEvaluationError(errorMessage);
@@ -125,7 +140,7 @@ const DsaArena = () => {
   };
 
   //  Function to format the code using Prettier
-   const handleFormatCode = async () => {
+  const handleFormatCode = async () => {
     try {
       let parser;
       let plugins; // <-- FIX: Declare plugins here, outside the switch
@@ -155,12 +170,27 @@ const DsaArena = () => {
       console.error("Failed to format code:", error);
     }
   };
- 
+
   // For closing the feedback panel when clicking close
   const closeFeedbackPanel = () => {
     setFeedback(null);
     setEvaluationError(null);
   };
+
+  const getFeedbackStatus = () => {
+    if (!feedback) return null;
+    const text = feedback.correctness.toLowerCase();
+
+    if (text.includes('incorrect') || text.includes('error') || text.includes('not correct') || text.includes('incomplete')) {
+      return { type: 'error', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', icon: <AlertCircle className="text-red-400" /> };
+    }
+    if (text.includes('correct') || text.includes('optimal')) {
+      return { type: 'success', color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', icon: <CheckCircle className="text-green-400" /> };
+    }
+    return { type: 'warning', color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', icon: <AlertTriangle className="text-yellow-400" /> };
+  };
+
+  const status = getFeedbackStatus();
 
   return (
     <div className="flex flex-col flex-1 h-full">
@@ -282,34 +312,31 @@ const DsaArena = () => {
               <div className="flex-1 overflow-y-auto pr-2 text-text-secondary">
                 {isEvaluating && <p>AI is evaluating your code...</p>}
                 {evaluationError && <div className="text-red-400">Error: {evaluationError}</div>}
-                {feedback && (
+                {feedback && status && (
                   <div className="space-y-4">
-                    <div>
-                      <h4 className="font-semibold text-text-primary mb-1">Correctness</h4>
-                      <p className="text-sm">{feedback.correctness}</p>
+                    {/* Colored Status Box */}
+                    <div className={`flex items-start gap-3 p-3 rounded-lg border ${status.bg} ${status.border}`}>
+                        <div className="mt-0.5">{status.icon}</div>
+                        <div>
+                            <h4 className={`font-bold ${status.color} mb-1`}>
+                                {status.type === 'success' ? 'Solution Correct' : status.type === 'error' ? 'Solution Incorrect' : 'Review Needed'}
+                            </h4>
+                            <p className="text-sm text-text-primary">{feedback.correctness}</p>
+                        </div>
                     </div>
-                    <div>
-                      <h4 className="font-semibold text-text-primary mb-1">Time Complexity</h4>
-                      <p className="text-sm">{feedback.timeComplexity}</p>
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-text-primary mb-1">Space Complexity</h4>
-                      <p className="text-sm">{feedback.spaceComplexity}</p>
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-text-primary mb-1">Optimization</h4>
-                      <p className="text-sm">{feedback.optimization}</p>
-                    </div>
+
+                    <div><h4 className="font-semibold text-text-primary mb-1">Time Complexity</h4><p className="text-sm">{feedback.timeComplexity}</p></div>
+                    <div><h4 className="font-semibold text-text-primary mb-1">Space Complexity</h4><p className="text-sm">{feedback.spaceComplexity}</p></div>
+                    <div><h4 className="font-semibold text-text-primary mb-1">Optimization</h4><p className="text-sm">{feedback.optimization}</p></div>
                   </div>
                 )}
               </div>
             </div>
           )}
         </div>
-
       </div>
     </div>
   );
 };
 
-export default DsaArena;
+      export default DsaArena;

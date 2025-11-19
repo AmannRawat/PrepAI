@@ -19,6 +19,13 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: [true, "Password is required"],
         minlength: [6, "Password must be at least 6 characters long"]
+    },
+    currentStreak: {
+        type: Number,
+        default: 0 // Start all users at 0
+    },
+    lastActivityDate: {
+        type: Date
     }
 }, {
     // Adds 'createdAt' and 'updatedAt' timestamps automatically
