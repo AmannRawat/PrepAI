@@ -137,7 +137,7 @@ const Dashboard = () => {
       {/* header section */}
       <div className="mb-16">
         {/* big heading */}
-        <h1 className="text-6xl md:text-7xl font-bold text-accent font-serif mb-4">
+        <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-accent font-serif mb-4">
           PrepAI
         </h1>
         {/* typing animation under the heading */}

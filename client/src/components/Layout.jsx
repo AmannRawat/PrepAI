@@ -3,6 +3,7 @@ import { Outlet, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import ThemeToggle from './ThemeToggle';
 import StreakCounter from './StreakCounter';
+import MobileNav from './MobileNav';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -23,10 +24,10 @@ const Layout = () => {
 
       {/* The main content area that will change based on the route */}
       <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto relative">
-        <div className="absolute top-6 right-8 z-20 flex items-center gap-4">
-            <StreakCounter /> {/* The Streak component */}
-            <ThemeToggle />   {/* The Theme Toggle */}
-          </div>
+        <div className="flex justify-end gap-4 mb-4 md:mb-0 md:absolute md:top-6 md:right-8 z-20">
+              <StreakCounter />
+              <ThemeToggle />
+            </div>
         {/* Add Animation Wrapper */}
         <AnimatePresence mode="wait">
           <motion.div
@@ -42,6 +43,7 @@ const Layout = () => {
           </motion.div>
         </AnimatePresence>
       </main>
+      <MobileNav />
     </div>
 
   );
