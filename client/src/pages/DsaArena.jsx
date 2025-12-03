@@ -1,9 +1,9 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
-// Import Axios to make API calls
+// Importing Axios to make API calls
 import axios from 'axios';
 
-// ---  Import CodeMirror and its extensions ---
+//   Importing CodeMirror and its extensions ---
 import CodeMirror from '@uiw/react-codemirror';
 import { okaidia } from '@uiw/codemirror-theme-okaidia';
 import { javascript } from '@codemirror/lang-javascript';
@@ -11,7 +11,7 @@ import { cpp } from '@codemirror/lang-cpp';
 import { java } from '@codemirror/lang-java';
 import { python } from '@codemirror/lang-python';
 
-//Import Prettier for code formatting
+//Importing Prettier for code formatting
 import prettier from "prettier/standalone";
 import babel from 'prettier/plugins/babel';
 import estree from 'prettier/plugins/estree';
@@ -22,7 +22,7 @@ import { CheckCircle, AlertCircle, AlertTriangle } from 'lucide-react';
 
 const DsaArena = () => {
   const { token, refreshUserData } = useAuth();
-  // ---  Set up state to hold the code ---
+  //  Set up state to hold the code ---
   const [code, setCode] = useState(
     "function solve() {\n  // Your code here\n  console.log('Hello, PrepAI!');\n}"
   );
@@ -73,14 +73,14 @@ const DsaArena = () => {
     setCode(value);
   }, []);
 
-  //  NEW: Function to generate a problem 
+  //   Function to generate a problem 
   const generateProblem = async () => {
     setError(null);
     setIsLoading(true);
     setProblem(null);
     setFeedback(null);
     try {
-      const response = await axios.post('http://localhost:8000/api/generate-problem', { topic, difficulty }, {
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/generate-problem`, { topic, difficulty }, {
         // Added Authorization header with the token
         headers: {
           'Authorization': `Bearer ${token}`
@@ -105,7 +105,7 @@ const DsaArena = () => {
     setIsEvaluating(true);
     setFeedback(null);
     try {
-      const response = await axios.post('http://localhost:8000/api/evaluate-code', {
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/evaluate-code`, {
         problem,
         code,
         language,
@@ -121,7 +121,7 @@ const DsaArena = () => {
       //  Record this activity for the daily streak 
       // We do this *after* the submission is successful.
       // We don't need to 'await' it, we can just "fire and forget"
-      axios.post('http://localhost:8000/api/user/record-activity', {}, {
+      axios.post(`${import.meta.env.VITE_API_URL}/api/user/record-activity`, {}, {
         headers: { 'Authorization': `Bearer ${token}` }
       }).then(() => {
         // Update the streak UI immediately
@@ -259,7 +259,7 @@ const DsaArena = () => {
                 <button onClick={handleFormatCode} title="Format Code" className="text-text-secondary hover:text-text-primary">
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3c-1.2 0-2.4.6-3 1.7A3.6 3.6 0 0 0 8.3 9c0 2.3 1.9 3.5 3.7 3.5s3.7-1.2 3.7-3.5A3.6 3.6 0 0 0 15 4.7c-.6-1.1-1.8-1.7-3-1.7Z" /><path d="M12 14v8" /><path d="M5 14h14" /></svg>
                 </button>
-                {/* --- Adding the language selector dropdown --- */}
+                {/*  Adding the language selector dropdown  */}
                 <select
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}
@@ -273,7 +273,7 @@ const DsaArena = () => {
               </div>
             </div>
 
-            {/* --- Step 4: Replace placeholder div with the CodeMirror component --- */}
+            {/*  Replace placeholder div with the CodeMirror component*/}
             <div className="flex-1 overflow-y-auto"> {/* We make this container scrollable */}
               <CodeMirror
                 value={code}
@@ -281,10 +281,9 @@ const DsaArena = () => {
                 theme={okaidia} // Apply the dark theme
                 extensions={[langExtension]} // Enable JavaScript syntax highlighting
                 onChange={onChange}
-                style={{ fontSize: '16px' }} // Optional: Adjust font size
+                style={{ fontSize: '16px' }}
               />
             </div>
-            {/* ------------------------------------------------------------------- */}
 
             <div className="p-2 bg-background border-t border-text-secondary/20">
               {/* Connect the button to the handler and add dynamic text/disabled state */}

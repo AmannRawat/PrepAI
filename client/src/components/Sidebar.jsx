@@ -12,7 +12,7 @@ const Sidebar = () => {
     const fetchStreak = async () => {
       if (!token) return;
       try {
-        const response = await axios.get('http://localhost:8000/api/user/progress', {
+        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/user/progress`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         setStreak(response.data.currentStreak || 0);

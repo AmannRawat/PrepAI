@@ -42,7 +42,7 @@ const ResumeReviewer = () => {
     formData.append('resume', selectedFile); // 'resume' must match the key expected by multer
 
     try {
-      const response = await axios.post('http://localhost:8000/api/review-resume', formData, {
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/review-resume`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data', // Important header for file uploads
           'Authorization': `Bearer ${token}`, // Include the JWT token for authentication
@@ -50,7 +50,7 @@ const ResumeReviewer = () => {
       });
       setFeedback(response.data); // Store the AI's feedback object
       //  Record this activity for the daily streak 
-      axios.post('http://localhost:8000/api/user/record-activity', {}, {
+      axios.post(`${import.meta.env.VITE_API_URL}/api/user/record-activity`, {}, {
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => {
         console.error("Failed to record activity:", err);

@@ -131,7 +131,7 @@ const BehavioralCoach = () => {
 
     try {
       // Call the real backend API with the new chat history
-      const response = await axios.post('http://localhost:8000/api/behavioral-chat', {
+      const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/behavioral-chat`, {
         messages: newMessageHistory,
       }, {
         //  Add Authorization header
@@ -155,7 +155,7 @@ const BehavioralCoach = () => {
       // Record this activity for the daily streak
       // We only do this ONCE per session, on the first successful message
       if (!activityRecorded && messageText !== "USER_ACTION: End interview") {
-        axios.post('http://localhost:8000/api/user/record-activity', {}, {
+        axios.post(`${import.meta.env.VITE_API_URL}/api/user/record-activity`, {}, {
           headers: { 'Authorization': `Bearer ${token}` }
         }).then(() => {
           setActivityRecorded(true); // Mark as recorded for this session
@@ -257,7 +257,7 @@ const BehavioralCoach = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* --- NEW --- Conditionally render the input form OR the "New Interview" button */}
+      {/*  Conditionally render the input form OR the "New Interview" button */}
       {!isSessionOver ? (
         <form onSubmit={handleSubmit} className="flex items-center gap-4">
           <input

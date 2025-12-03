@@ -70,7 +70,7 @@ const Dashboard = () => {
       }
       try {
         // Call the endpoint we built to get all user data
-        const response = await axios.get('http://localhost:8000/api/user/progress', {
+        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/user/progress`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         setProgress(response.data); // Save the data {dsaSubmissions, resumeReviews, ...}

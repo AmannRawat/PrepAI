@@ -486,5 +486,5 @@ app.post('/api/user/record-activity', authMiddleware, async (req, res) => {
 
 // Start the Server
 app.listen(PORT, () => {
-    console.log(`Server is listening on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });

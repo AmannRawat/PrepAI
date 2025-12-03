@@ -83,7 +83,7 @@ const ProfilePage = () => {
 
       try {
         // Fetch data from our new protected endpoint
-        const response = await axios.get('http://localhost:8000/api/user/progress', {
+        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/user/progress`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
