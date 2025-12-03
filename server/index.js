@@ -31,7 +31,10 @@ const app = express();
 app.use(cors({
     // In production, this set FRONTEND_URL in Vercel.
     // Locally, it defaults to localhost.
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    origin: [
+        "http://localhost:5173", 
+        "https://prepai-client-try.vercel.app"
+    ],
     credentials: true
 }));
 app.use(express.json());
