@@ -8,4 +8,11 @@ export default defineConfig({
     react(),
     tailwindcss(), // This is the new official plugin
   ],
+  build: {
+    rollupOptions: {
+      // This tells Vite to ignore these Node.js-specific modules
+      // preventing the build from crashing.
+      external: ['fs', 'path', 'os'],
+    },
+  },
 })
