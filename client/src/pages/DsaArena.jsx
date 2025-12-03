@@ -15,7 +15,7 @@ import { python } from '@codemirror/lang-python';
 import prettier from "prettier/standalone";
 import babel from 'prettier/plugins/babel';
 import estree from 'prettier/plugins/estree';
-import * as javaPlugin from "prettier-plugin-java";
+// import * as javaPlugin from "prettier-plugin-java";
 import { useAuth } from '../context/AuthContext';
 import { CheckCircle, AlertCircle, AlertTriangle } from 'lucide-react';
 
@@ -150,10 +150,10 @@ const DsaArena = () => {
           parser = 'babel';
           plugins = [babel, estree]; // Assign value inside the switch
           break;
-        case 'java':
-          parser = 'java';
-          plugins = [javaPlugin]; // Assign value inside the switch
-          break;
+        // case 'java':
+        //   parser = 'java';
+        //   plugins = [javaPlugin]; // Assign value inside the switch
+        //   break;
         default:
           console.log(`Formatting for ${language} is not yet supported.`);
           return;
