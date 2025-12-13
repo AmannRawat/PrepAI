@@ -254,7 +254,7 @@ const BehavioralCoach = () => {
   };
 
   return (
-    <div className="flex flex-col flex-1 h-full p-4 pt-12 bg-surface/70 rounded-lg border border-text-secondary/20 relative">
+    <div className="flex flex-col flex-1 h-[85vh] md:h-full p-4 pt-12 bg-surface/70 rounded-lg border border-text-secondary/20 relative">
 
       {/* SETUP MODAL OVERLAY *** */}
       {showSetup && (
@@ -419,7 +419,7 @@ const BehavioralCoach = () => {
       </div>
 
       {!isSessionOver ? (
-        <form onSubmit={handleSubmit} className="flex items-center gap-4">
+        <form onSubmit={handleSubmit} className="flex items-center gap-4 mb-16 md:mb-0">
           <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type your answer..." className="flex-1 p-3 bg-background text-text-primary rounded-lg border border-text-secondary/30 focus:outline-none focus:ring-2 focus:ring-accent" disabled={isLoading} />
           <button type="submit" className="bg-accent p-3 rounded-lg text-white hover:opacity-90 transition-opacity disabled:opacity-50" disabled={isLoading || !input.trim()}><Send size={24} /></button>
           <button type="button" onClick={handleEndInterview} className="bg-red-600/80 p-3 rounded-lg text-white hover:bg-red-600 transition-colors disabled:opacity-50" disabled={isLoading}><LogOut size={24} /></button>
