@@ -227,7 +227,7 @@ const ProfilePage = () => {
                 <p className="text-text-secondary">No DSA submissions found. Try the DSA Arena!</p>
               )}
             </div>
-            {/* Recent Resume Reviews */}
+      {/* Recent Resume Reviews */}
             <div className="bg-surface/70 p-6 rounded-lg">
               <h2 className="text-xl font-semibold text-text-primary mb-4">Recent Resume Reviews</h2>
               {progress.resumeReviews.length > 0 ? (
@@ -236,7 +236,14 @@ const ProfilePage = () => {
                     <li key={review._id} className="p-4 bg-background/50 rounded-md border border-text-secondary/20">
                       <p className="font-semibold text-accent">ATS Score: {review.atsAssessment?.estimatedScore || 'N/A'} / 100</p>
                       <p className="text-sm text-text-secondary mt-1">Reviewed on: {formatDate(review.createdAt)}</p>
-                      <p className="text-sm text-text-secondary mt-2">"{review.strengths[0].substring(0, 100)}..."</p>
+                      
+                      <p className="text-sm text-text-secondary mt-2">
+                        "{(review.strengths && review.strengths.length > 0 
+                            ? review.strengths[0] 
+                            : "No strength details available"
+                          ).substring(0, 100)}..."
+                      </p>
+                      
                     </li>
                   ))}
                 </ul>
@@ -245,18 +252,28 @@ const ProfilePage = () => {
               )}
             </div>
 
-            {/* Recent Behavioral Chats */}
+           {/* Recent Behavioral Chats */}
             <div className="bg-surface/70 p-6 rounded-lg">
               <h2 className="text-xl font-semibold text-text-primary mb-4">Recent Behavioral Chats</h2>
               {progress.chatSessions.length > 0 ? (
                 <ul className="space-y-3">
-                  {progress.chatSessions.map((session) => (
-                    <li key={session._id} className="p-4 bg-background/50 rounded-md border border-text-secondary/20">
-                      <p className="font-semibold text-text-primary">Chat Session from {formatDate(session.createdAt)}</p>
-                      <p className="text-sm text-text-secondary mt-1">{session.messages.length} messages in this session.</p>
-                      <p className="text-sm text-text-secondary mt-2 italic">"{session.messages[session.messages.length - 1].text.substring(0, 100)}..."</p>
-                    </li>
-                  ))}
+                  {progress.chatSessions.map((session) => {
+                     // Helper to safely get the last message text
+                     const lastMsg = session.messages && session.messages.length > 0 
+                        ? session.messages[session.messages.length - 1].text 
+                        : "No preview available";
+
+                     return (
+                        <li key={session._id} className="p-4 bg-background/50 rounded-md border border-text-secondary/20">
+                          <p className="font-semibold text-text-primary">Chat Session from {formatDate(session.createdAt)}</p>
+                          <p className="text-sm text-text-secondary mt-1">{session.messages?.length || 0} messages in this session.</p>
+                          
+                          <p className="text-sm text-text-secondary mt-2 italic">
+                            "{lastMsg.substring(0, 100)}..."
+                          </p>
+                        </li>
+                     );
+                  })}
                 </ul>
               ) : (
                 <p className="text-text-secondary">No chat sessions found. Try the Behavioral Coach!</p>
