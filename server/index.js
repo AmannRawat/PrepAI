@@ -32,8 +32,9 @@ app.use(cors({
     // In production, this set FRONTEND_URL in Vercel.
     // Locally, it defaults to localhost.
     origin: [
-        "http://localhost:5173", 
-        "https://prepai-client-try.vercel.app"
+        "http://localhost:5173",
+        "https://prepai-client-try.vercel.app",
+        "https://prepai-app.vercel.app"
     ],
     credentials: true
 }));
@@ -275,26 +276,75 @@ app.post('/api/evaluate-code', authMiddleware, async (req, res) => {
 
 app.post('/api/behavioral-chat', authMiddleware, async (req, res) => {
     try {
-        const { messages } = req.body; // Expect an array of message objects
+        //We now extract 'targetRole', 'targetCompany', and 'useResumeContext' too
+        const { messages, targetRole, targetCompany, useResumeContext } = req.body;
 
         if (!messages || messages.length === 0) {
             return res.status(400).json({ error: 'Chat history is required.' });
         }
 
+        //  Logic to handle Resume Context based on user preference
+        let resumeContext = "";
+
+        // Only fetch resume if useResumeContext is NOT false (default to true)
+        if (useResumeContext !== false) {
+            const latestResume = await ResumeReview.findOne({ user: req.user.id })
+                .sort({ createdAt: -1 }); // Get the newest one
+
+            if (latestResume && latestResume.resumeText) {
+                // We limit text length to avoid token limits
+                resumeContext = `
+                 \n\nCRITICAL CONTEXT - CANDIDATE RESUME:
+                 The candidate has uploaded a resume. USE THIS CONTEXT to ask personalized questions about their specific projects, skills, and work experience.
+                 RESUME TEXT:
+                 ${latestResume.resumeText.substring(0, 5000)}
+                 `;
+            }
+        }
+
+        // Define the dynamic Role and Company text
+        const roleText = targetRole ? `the role of "${targetRole}"` : "a software engineering role";
+        const companyText = targetCompany ? `at "${targetCompany}"` : "a top tech company";
+
         //  The "System Prompt" - This defines the AI's persona and rules
-        const systemPrompt = `
-            You are "Aman", a friendly, encouraging, and professional hiring manager at a top tech company. 
-            Your goal is to conduct a behavioral interview with a computer science student.
+        const systemPromptOld = `
+           You are "Aman", a friendly, encouraging, and professional hiring manager ${companyText}. 
+            Your goal is to conduct a behavioral interview with a candidate for ${roleText}.
+            
+            ${resumeContext} 
+            
             Follow these rules strictly:
             1. Your persona is helpful and insightful. Conduct the entire interview in professional English.
             2. Ask one behavioral question at a time. Start with an introduction and the first question.
-            3. After the user answers, if their answer is too short, vague, or misses key details, ask one or two clarifying follow-up questions to encourage them to elaborate. 
-            4. If the user's response is irrelevant or nonsensical, gently guide them back on topic.
-            5. Once you have a complete answer, provide feedback based ONLY on the STAR method, then seamlessly transition to the next behavioral question.
-            6. When the user sends the message "USER_ACTION: End interview", you must begin the conclusion. First, ask the user, "That brings us to the end of our session. Would you like a summary of your performance?"
-            7. If the user's next response is "yes" or affirmative, your NEXT and FINAL message must be a comprehensive summary report of their performance. If their response is "no" or negative, your FINAL message should be a simple, polite closing.
-            8. Your very final message (either the summary or the polite closing) MUST end with the special token: [SESSION_END]
-            9. Never break character. Your responses should be conversational and professional.
+            3. If the user has a resume (see Context above), ask questions specifically linking their past projects to ${roleText}.
+            4. If the user provided a target company (${companyText}), tailor your questions to that company's culture (e.g., if Amazon, focus on Leadership Principles; if Google, focus on "Googliness").
+            5. After the user answers, if their answer is too short, vague, or misses key details, ask one or two clarifying follow-up questions to encourage them to elaborate. 
+            6. If the user's response is irrelevant or nonsensical, gently guide them back on topic.
+            7. Once you have a complete answer, provide feedback based ONLY on the STAR method, then seamlessly transition to the next behavioral question.
+            8. When the user sends the message "USER_ACTION: End interview", you must begin the conclusion. First, ask the user, "That brings us to the end of our session. Would you like a summary of your performance?"
+            9. If the user's next response is "yes" or affirmative, your NEXT and FINAL message must be a comprehensive summary report of their performance. If their response is "no" or negative, your FINAL message should be a simple, polite closing.
+            10. Your very final message (either the summary or the polite closing) MUST end with the special token: [SESSION_END]
+            11. Never break character. Your responses should be conversational and professional.
+        `;
+        const systemPrompt = `
+            You are "Aman", a professional hiring manager ${companyText}. 
+            Your goal is to conduct a behavioral interview for ${roleText}.
+            
+            ${resumeContext} 
+            
+            CRITICAL RULES FOR INTERACTION:
+            1. **BREVITY IS KEY:** Real humans speak in 1-3 sentences. NEVER write long paragraphs.
+            2. **ONE QUESTION RULE:** Ask exactly ONE question. Wait for the user's answer.
+            3. **PERSONALIZE:** - Use the candidate's Resume (if provided) to ask about specific projects.
+               - Tailor questions to ${companyText}'s specific culture/values (e.g., "Customer Obsession" for Amazon, "Move Fast" for Meta).
+            4. **THE LOOP:** - Ask a question.
+               - If the answer is vague, ask a clarifying follow-up (e.g., "What was YOUR specific role?").
+               - If the answer is good, give 1 sentence of STAR-based feedback, then move to the next question.
+            5. **THE CLOSING:** - When user sends "USER_ACTION: End interview", ask: "Interview done. Want a feedback summary?"
+               - If "Yes": Provide a detailed STAR report. 
+               - If "No": Say goodbye.
+               - ALWAYS End the final message with: [SESSION_END]
+            6. **TONE:** Professional but conversational. Do not be a robot.
         `;
 
         // Format the history for the Gemini API
@@ -359,6 +409,12 @@ app.post('/api/review-resume', authMiddleware, upload.single('resume'), async (r
             You are an expert career coach specializing in software engineering resumes.
             Analyze the following resume text and provide constructive feedback as a clean, raw JSON object.
 
+            **VALIDATION STEP:**
+            - If the text looks like an academic assignment, homework, essay, research paper, or random gibberish, return ONLY this JSON:
+              { "error": "The uploaded file does not appear to be a resume. It looks like an assignment or document." }
+            
+            - ONLY if it is a valid resume, proceed with the analysis below
+            **RESUME ANALYSIS:**
             The JSON object must have this exact structure:
             {
               "atsAssessment": {
@@ -379,9 +435,12 @@ app.post('/api/review-resume', authMiddleware, upload.single('resume'), async (r
         const result = await flashModel.generateContent(prompt);
         const responseText = result.response.text();
         const parsedResponse = extractJson(responseText); // Using existing helper function
-
+        if (parsedResponse.error) {
+            return res.status(400).json({ error: parsedResponse.error });
+        }
         const newReview = new ResumeReview({
             user: req.user.id, // Get the user's ID from our authMiddleware
+            resumeText: resumeText, // <--- Saving the raw text for the Chatbot to use later!
             atsAssessment: parsedResponse.atsAssessment,
             strengths: parsedResponse.strengths,
             areasForImprovement: parsedResponse.areasForImprovement,

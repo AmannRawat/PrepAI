@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, LogOut, RefreshCw, Mic, Volume2, VolumeX } from 'lucide-react';// A nice icon for the send button
+import { Send, LogOut, RefreshCw, Mic, Volume2, VolumeX, PlayCircle, Settings, FileText ,Upload, CheckCircle, Loader2} from 'lucide-react';// A nice icon for the send button
 import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const BehavioralCoach = () => {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const initialMessage = { sender: 'ai', text: "Hello! I'm your AI Behavioral Coach. To start, tell me about a time you had to work on a team." };
   // State to hold the conversation history
   const [messages, setMessages] = useState([initialMessage]);
@@ -18,6 +20,16 @@ const BehavioralCoach = () => {
   const [voices, setVoices] = useState([]);
   const [selectedVoiceName, setSelectedVoiceName] = useState('');
   const [activityRecorded, setActivityRecorded] = useState(false);
+  const [showSetup, setShowSetup] = useState(true); // Shows the setup modal on load
+  const [targetRole, setTargetRole] = useState('Software Engineer');
+  const [targetCompany, setTargetCompany] = useState('Tech Company');
+  const [useResume, setUseResume] = useState(true);
+
+  //  Upload State 
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const fileInputRef = useRef(null); // Ref to trigger hidden file input
+
   const [isTtsEnabled, setIsTtsEnabled] = useState(() => {
     const saved = localStorage.getItem('isTtsEnabled');
     return saved !== null ? JSON.parse(saved) : true; // Default to true if not saved
@@ -93,19 +105,75 @@ const BehavioralCoach = () => {
   const stopSpeaking = () => {
     window.speechSynthesis.cancel();
   }
-  const startNewInterview = () => {
-    stopSpeaking()// Stop speaking
-    setMessages([initialMessage]);
-    setIsSessionOver(false);
-    speak(initialMessage.text); // Speak the new greeting
-    setActivityRecorded(false);
+  // const startNewInterview = () => {
+  //   stopSpeaking()// Stop speaking
+  //   setMessages([initialMessage]);
+  //   setIsSessionOver(false);
+  //   speak(initialMessage.text); // Speak the new greeting
+  //   setActivityRecorded(false);
+  // };
+ const startNewInterview = () => {
+    stopSpeaking();
+    setMessages([initialMessage]); // Reset to just the greeting
+    setInput('');                  // Clear any typed text
+    setIsSessionOver(false);       // Reset session flag
+    setUploadSuccess(false);       // Reset upload checkmark
+    setShowSetup(true);            // Re-open the setup modal
   };
 
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf') {
+        alert("Please upload a PDF file.");
+        return;
+    }
+
+    setIsUploading(true);
+    setUploadSuccess(false);
+
+    const formData = new FormData();
+    formData.append('resume', file);
+
+    try {
+        // We reuse the review endpoint. 
+        // It saves the text to DB, which is what we need for the context.
+        await axios.post(`${import.meta.env.VITE_API_URL}/api/review-resume`, formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+                'Authorization': `Bearer ${token}`,
+            },
+        });
+        
+        setUploadSuccess(true);
+        setUseResume(true); // Auto-enable the checkbox
+    } catch (error) {
+        console.error("Upload failed", error);
+        if (error.response && error.response.data && error.response.data.error) {
+            // This catches the "This is an assignment" error from the backend
+            alert(`Upload Failed: ${error.response.data.error}`);
+        } else {
+            alert("Failed to upload resume. Please try again.");
+        }
+        // Reset the file input so they can try again
+        if (fileInputRef.current) fileInputRef.current.value = "";
+    } finally {
+        setIsUploading(false);
+    }
+  };
+  
   // Function to handle the form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
     stopSpeaking();
+    // Wake up audio on mobile
+    if (isTtsEnabled) {
+      const silentUtterance = new SpeechSynthesisUtterance(" ");
+      window.speechSynthesis.speak(silentUtterance);
+    }
     sendMessage(input); // Use a shared send message function
   };
 
@@ -133,6 +201,10 @@ const BehavioralCoach = () => {
       // Call the real backend API with the new chat history
       const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/behavioral-chat`, {
         messages: newMessageHistory,
+        //  Sending Setup Data to Backend
+        targetRole: targetRole,
+        targetCompany: targetCompany,
+        useResumeContext: useResume
       }, {
         //  Add Authorization header
         headers: {
@@ -182,114 +254,179 @@ const BehavioralCoach = () => {
   };
 
   return (
-    <div className="flex flex-col flex-1 h-full p-4 bg-surface/70 rounded-lg border border-text-secondary/20">
-      {/* // <div className="flex flex-col flex-1 h-full p-4 pt-12 bg-surface/70 rounded-lg border border-text-secondary/20"> */}
-      <header className="mb-4">
-        <h1 className="text-3xl font-bold text-text-primary">Behavioral Coach</h1>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-text-secondary">Practice common behavioral questions with your AI interviewer.</p>
+    <div className="flex flex-col flex-1 h-full p-4 pt-12 bg-surface/70 rounded-lg border border-text-secondary/20 relative">
 
-          {/* --- The New Dropdown --- */}
-          <div className="flex items-center gap-4 mt-2 sm:mt-0">
-            {/* Voice Selector Dropdown (unchanged) */}
-            <div className="flex items-center gap-2">
-              <Mic size={18} className="text-text-secondary" />
-              <select
-                value={selectedVoiceName}
-                onChange={(e) => setSelectedVoiceName(e.target.value)}
-                className="bg-surface text-text-primary rounded px-2 py-1 border border-text-secondary/30 focus:outline-none focus:ring-1 focus:ring-accent text-sm"
+      {/* SETUP MODAL OVERLAY *** */}
+      {showSetup && (
+        <div className="absolute inset-0 z-50 bg-background/95 backdrop-blur-sm flex items-center justify-center p-4 rounded-lg">
+          <div className="bg-surface border border-accent/30 p-6 rounded-xl shadow-2xl max-w-md w-full">
+            <h2 className="text-2xl font-bold text-accent mb-4 text-center">Interview Setup</h2>
+
+            <div className="space-y-4">
+              {/* Role Input */}
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1">Target Role</label>
+                <input
+                  type="text"
+                  value={targetRole}
+                  onChange={(e) => setTargetRole(e.target.value)}
+                  placeholder="e.g. Frontend Developer"
+                  className="w-full p-2 bg-background border border-text-secondary/30 rounded focus:border-accent outline-none text-text-primary"
+                />
+              </div>
+
+              {/* Company Input */}
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1">Target Company</label>
+                <input
+                  type="text"
+                  value={targetCompany}
+                  onChange={(e) => setTargetCompany(e.target.value)}
+                  placeholder="e.g. Google, Amazon"
+                  className="w-full p-2 bg-background border border-text-secondary/30 rounded focus:border-accent outline-none text-text-primary"
+                />
+              </div>
+
+              {/* Resume Toggle Section */}
+              <div className="bg-background/50 p-3 rounded border border-text-secondary/20">
+                <div className="flex items-center justify-between mb-2">
+                   <label className="flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={useResume} 
+                        onChange={(e) => setUseResume(e.target.checked)}
+                        className="form-checkbox h-5 w-5 text-accent rounded bg-surface border-text-secondary/50"
+                      />
+                      <span className="ml-2 text-text-primary font-medium">Use Resume Context</span>
+                   </label>
+                </div>
+                
+                <p className="text-xs text-text-secondary mb-3">
+                  Uses your uploaded resume to personalize questions.
+                </p>
+
+                {/* Hidden File Input */}
+                <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    accept=".pdf" 
+                    onChange={handleFileUpload}
+                />
+
+                {/* Quick Upload Button */}
+                <button 
+                  onClick={() => fileInputRef.current.click()}
+                  disabled={isUploading}
+                  className="w-full py-2 border border-dashed border-accent/50 rounded flex items-center justify-center gap-2 text-xs text-accent hover:bg-accent/10 transition-colors"
+                >
+                  {isUploading ? (
+                      <> <Loader2 size={14} className="animate-spin" /> Uploading...</>
+                  ) : uploadSuccess ? (
+                      <> <CheckCircle size={14} /> Resume Updated!</>
+                  ) : (
+                      <> <Upload size={14} /> Upload New Resume (PDF)</>
+                  )}
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setShowSetup(false);
+                  // Optionally send a "Start" message silently to seed context
+                  speak(`Okay, I'm ready to interview you for the ${targetRole} position at ${targetCompany}.`);
+                }}
+                className="w-full bg-accent hover:bg-accent-darker text-white font-bold py-3 rounded-lg transition-colors mt-2"
               >
-                {/* Added the mapping logic to create the options*/}
-                <option value="">-- Select a Voice --</option>
-                {voices.map(voice => (
-                  <option key={voice.name} value={voice.name}>
-                    {voice.name} ({voice.lang})
-                  </option>
-                ))}
-              </select>
+                Start Interview
+              </button>
             </div>
+          </div>
+        </div>
+      )}
 
-            {/* New Toggle Button */}
+      {/* HEADER */}
+      <header className="mb-4">
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-3xl font-bold text-text-primary">Behavioral Coach</h1>
+            <p className="text-text-secondary text-sm">
+              Role: <span className="text-accent">{targetRole}</span> | Company: <span className="text-accent">{targetCompany}</span>
+            </p>
+          </div>
+          {/* Settings Button to reopen setup */}
+          <button onClick={() => setShowSetup(true)} className="p-2 text-text-secondary hover:text-accent">
+            <Settings size={20} />
+          </button>
+        </div>
+
+        {/* Voice Controls */}
+        <div className="flex justify-end mt-2">
+          <div className="flex items-center gap-2">
+            <Mic size={16} className="text-text-secondary" />
+            <select
+              value={selectedVoiceName}
+              onChange={(e) => setSelectedVoiceName(e.target.value)}
+              className="bg-surface text-text-primary rounded px-2 py-1 border border-text-secondary/30 text-xs max-w-[120px]"
+            >
+              <option value="">Default Voice</option>
+              {voices.map(voice => (
+                <option key={voice.name} value={voice.name}>
+                  {voice.name.substring(0, 15)}...
+                </option>
+              ))}
+            </select>
             <button
               onClick={() => {
-                setIsTtsEnabled(!isTtsEnabled);
-                if (isTtsEnabled) { // If it's currently on, stop speaking
-                  stopSpeaking();
-                }
+                const newState = !isTtsEnabled;
+                setIsTtsEnabled(newState);
+                if (!newState) stopSpeaking();
               }}
-              title={isTtsEnabled ? "Mute Voice" : "Unmute Voice"}
-              className="p-2 rounded-lg border border-text-secondary/30 text-text-secondary hover:text-text-primary"
+              className="p-1 rounded border border-text-secondary/30 text-text-secondary hover:text-text-primary"
             >
-              {isTtsEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+              {isTtsEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
             </button>
           </div>
-
         </div>
       </header>
 
-      {/* Message Display Area */}
+      {/* Chat Area */}
       <div className="flex-1 overflow-y-auto pr-2 space-y-4 mb-4">
         {messages.map((msg, index) => {
           if (msg.text === "USER_ACTION: End interview") return null;
           return (
-            <div
-              key={index}
-              className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-xl p-3 rounded-lg whitespace-pre-wrap ${msg.sender === 'ai'
-                  ? 'bg-background text-text-primary'
-                  : 'bg-accent text-white'
-                  }`}
-              >
+            <div key={index} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} group`}>
+              <div className={`max-w-xl p-3 rounded-lg whitespace-pre-wrap relative ${msg.sender === 'ai' ? 'bg-background text-text-primary' : 'bg-accent text-white'}`}>
                 {msg.text}
+                {msg.sender === 'ai' && (
+                  <button
+                    onClick={() => speak(msg.text)}
+                    className="absolute -right-8 top-1 opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary hover:text-accent p-1"
+                  >
+                    <PlayCircle size={20} />
+                  </button>
+                )}
               </div>
             </div>
           );
         })}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-background text-text-primary p-3 rounded-lg">
-              <span className="animate-pulse">AI is typing...</span>
-            </div>
+            <div className="bg-background text-text-primary p-3 rounded-lg"><span className="animate-pulse">AI is typing...</span></div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/*  Conditionally render the input form OR the "New Interview" button */}
       {!isSessionOver ? (
         <form onSubmit={handleSubmit} className="flex items-center gap-4">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Type your answer here..."
-            className="flex-1 p-3 bg-background text-text-primary rounded-lg border border-text-secondary/30 focus:outline-none focus:ring-2 focus:ring-accent"
-            disabled={isLoading}
-          />
-          <button type="submit" className="bg-accent p-3 rounded-lg text-white hover:opacity-90 transition-opacity disabled:opacity-50" disabled={isLoading || !input.trim()}>
-            <Send size={24} />
-          </button>
-          <button
-            type="button"
-            onClick={handleEndInterview}
-            title="End Interview & Get Summary"
-            className="bg-red-600/80 p-3 rounded-lg text-white hover:bg-red-600 transition-colors disabled:opacity-50"
-            disabled={isLoading}
-          >
-            <LogOut size={24} />
-          </button>
+          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type your answer..." className="flex-1 p-3 bg-background text-text-primary rounded-lg border border-text-secondary/30 focus:outline-none focus:ring-2 focus:ring-accent" disabled={isLoading} />
+          <button type="submit" className="bg-accent p-3 rounded-lg text-white hover:opacity-90 transition-opacity disabled:opacity-50" disabled={isLoading || !input.trim()}><Send size={24} /></button>
+          <button type="button" onClick={handleEndInterview} className="bg-red-600/80 p-3 rounded-lg text-white hover:bg-red-600 transition-colors disabled:opacity-50" disabled={isLoading}><LogOut size={24} /></button>
         </form>
       ) : (
         <div className="flex justify-center items-center pt-4">
-          <button
-            onClick={startNewInterview}
-            className="flex items-center gap-2 bg-accent text-white font-bold py-3 px-6 rounded-lg hover:opacity-90 transition-opacity"
-          >
-            <RefreshCw size={20} />
-            Start New Interview
-          </button>
+          <button onClick={startNewInterview} className="flex items-center gap-2 bg-accent text-white font-bold py-3 px-6 rounded-lg hover:opacity-90 transition-opacity"><RefreshCw size={20} /> Start New Interview</button>
         </div>
       )}
     </div>
