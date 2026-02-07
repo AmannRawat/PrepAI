@@ -4,7 +4,7 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
 const StreakCounter = () => {
-  const { token } = useAuth();
+  const { token, isLoggedIn } = useAuth();
   const [streak, setStreak] = useState(0);
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -24,8 +24,10 @@ const StreakCounter = () => {
     fetchStreak();
   }, [token]);
 
+  // If not logged in, return null (don't render anything)
+  if (!isLoggedIn) return null;
   return (
-    <div 
+    <div
       className="relative flex items-center"
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}

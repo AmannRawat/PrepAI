@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, LogOut, RefreshCw, Mic, Volume2, VolumeX, PlayCircle, Settings, FileText ,Upload, CheckCircle, Loader2} from 'lucide-react';// A nice icon for the send button
+import { Send, LogOut, RefreshCw, Mic, Volume2, VolumeX, PlayCircle, Settings, FileText, Upload, CheckCircle, Loader2, LogIn, AlertCircle } from 'lucide-react';// A nice icon for the send button
 import { useAuth } from '../context/AuthContext';
+import { useModal } from '../context/ModalContext';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const BehavioralCoach = () => {
-  const { token } = useAuth();
+  const { token, isLoggedIn } = useAuth();
+  const { openLogin } = useModal();
   const navigate = useNavigate();
   const initialMessage = { sender: 'ai', text: "Hello! I'm your AI Behavioral Coach. To start, tell me about a time you had to work on a team." };
   // State to hold the conversation history
@@ -23,7 +25,7 @@ const BehavioralCoach = () => {
   const [showSetup, setShowSetup] = useState(true); // Shows the setup modal on load
   const [targetRole, setTargetRole] = useState('Software Engineer');
   const [targetCompany, setTargetCompany] = useState('Tech Company');
-  const [useResume, setUseResume] = useState(true);
+  const [useResume, setUseResume] = useState(isLoggedIn);
 
   //  Upload State 
   const [isUploading, setIsUploading] = useState(false);
@@ -112,7 +114,7 @@ const BehavioralCoach = () => {
   //   speak(initialMessage.text); // Speak the new greeting
   //   setActivityRecorded(false);
   // };
- const startNewInterview = () => {
+  const startNewInterview = () => {
     stopSpeaking();
     setMessages([initialMessage]); // Reset to just the greeting
     setInput('');                  // Clear any typed text
@@ -123,12 +125,16 @@ const BehavioralCoach = () => {
 
 
   const handleFileUpload = async (e) => {
+    if (!isLoggedIn) {
+      openLogin();
+      return;
+    }
     const file = e.target.files[0];
     if (!file) return;
 
     if (file.type !== 'application/pdf') {
-        alert("Please upload a PDF file.");
-        return;
+      alert("Please upload a PDF file.");
+      return;
     }
 
     setIsUploading(true);
@@ -138,32 +144,32 @@ const BehavioralCoach = () => {
     formData.append('resume', file);
 
     try {
-        // We reuse the review endpoint. 
-        // It saves the text to DB, which is what we need for the context.
-        await axios.post(`${import.meta.env.VITE_API_URL}/api/review-resume`, formData, {
-            headers: {
-                'Content-Type': 'multipart/form-data',
-                'Authorization': `Bearer ${token}`,
-            },
-        });
-        
-        setUploadSuccess(true);
-        setUseResume(true); // Auto-enable the checkbox
+      // We reuse the review endpoint. 
+      // It saves the text to DB, which is what we need for the context.
+      await axios.post(`${import.meta.env.VITE_API_URL}/api/review-resume`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      setUploadSuccess(true);
+      setUseResume(true); // Auto-enable the checkbox
     } catch (error) {
-        console.error("Upload failed", error);
-        if (error.response && error.response.data && error.response.data.error) {
-            // This catches the "This is an assignment" error from the backend
-            alert(`Upload Failed: ${error.response.data.error}`);
-        } else {
-            alert("Failed to upload resume. Please try again.");
-        }
-        // Reset the file input so they can try again
-        if (fileInputRef.current) fileInputRef.current.value = "";
+      console.error("Upload failed", error);
+      if (error.response && error.response.data && error.response.data.error) {
+        // This catches the "This is an assignment" error from the backend
+        alert(`Upload Failed: ${error.response.data.error}`);
+      } else {
+        alert("Failed to upload resume. Please try again.");
+      }
+      // Reset the file input so they can try again
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } finally {
-        setIsUploading(false);
+      setIsUploading(false);
     }
   };
-  
+
   // Function to handle the form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -198,6 +204,9 @@ const BehavioralCoach = () => {
     setIsLoading(true);
 
     try {
+      const config = isLoggedIn && token
+        ? { headers: { 'Authorization': `Bearer ${token}` } }
+        : {};
       // Call the real backend API with the new chat history
       const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/behavioral-chat`, {
         messages: newMessageHistory,
@@ -205,12 +214,13 @@ const BehavioralCoach = () => {
         targetRole: targetRole,
         targetCompany: targetCompany,
         useResumeContext: useResume
-      }, {
+      }, 
         //  Add Authorization header
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+        // headers: {
+        //   'Authorization': `Bearer ${token}`
+        // }
+        config
+      );
 
       let aiText = response.data.reply;
       if (aiText.includes("[SESSION_END]")) {
@@ -253,17 +263,16 @@ const BehavioralCoach = () => {
     }
   };
 
-  return (
-    <div className="flex flex-col flex-1 h-[85vh] md:h-full p-4 pt-12 bg-surface/70 rounded-lg border border-text-secondary/20 relative">
+ return (
+    <div className="flex flex-col flex-1 h-[85vh] md:h-full p-4 pt-4 bg-surface/70 rounded-lg border border-text-secondary/20 relative">
 
-      {/* SETUP MODAL OVERLAY *** */}
+      {/* SETUP MODAL OVERLAY */}
       {showSetup && (
         <div className="absolute inset-0 z-50 bg-background/95 backdrop-blur-sm flex items-center justify-center p-4 rounded-lg">
-          <div className="bg-surface border border-accent/30 p-6 rounded-xl shadow-2xl max-w-md w-full">
+          <div className="bg-surface border border-accent/30 p-6 rounded-xl shadow-2xl max-w-md w-full animate-in fade-in zoom-in duration-200">
             <h2 className="text-2xl font-bold text-accent mb-4 text-center">Interview Setup</h2>
 
             <div className="space-y-4">
-              {/* Role Input */}
               <div>
                 <label className="block text-sm font-medium text-text-secondary mb-1">Target Role</label>
                 <input
@@ -275,7 +284,6 @@ const BehavioralCoach = () => {
                 />
               </div>
 
-              {/* Company Input */}
               <div>
                 <label className="block text-sm font-medium text-text-secondary mb-1">Target Company</label>
                 <input
@@ -287,53 +295,72 @@ const BehavioralCoach = () => {
                 />
               </div>
 
-              {/* Resume Toggle Section */}
+              {/* <--- NEW: Conditional Resume Section */}
               <div className="bg-background/50 p-3 rounded border border-text-secondary/20">
-                <div className="flex items-center justify-between mb-2">
-                   <label className="flex items-center cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={useResume} 
-                        onChange={(e) => setUseResume(e.target.checked)}
-                        className="form-checkbox h-5 w-5 text-accent rounded bg-surface border-text-secondary/50"
-                      />
-                      <span className="ml-2 text-text-primary font-medium">Use Resume Context</span>
-                   </label>
-                </div>
-                
-                <p className="text-xs text-text-secondary mb-3">
-                  Uses your uploaded resume to personalize questions.
-                </p>
+                {isLoggedIn ? (
+                    // OPTION A: LOGGED IN USER (See Upload)
+                    <>
+                        <div className="flex items-center justify-between mb-2">
+                           <label className="flex items-center cursor-pointer">
+                              <input 
+                                type="checkbox" 
+                                checked={useResume} 
+                                onChange={(e) => setUseResume(e.target.checked)}
+                                className="form-checkbox h-5 w-5 text-accent rounded bg-surface border-text-secondary/50"
+                              />
+                              <span className="ml-2 text-text-primary font-medium">Use Resume Context</span>
+                           </label>
+                        </div>
+                        
+                        <p className="text-xs text-text-secondary mb-3">
+                          Uses your uploaded resume to personalize questions.
+                        </p>
 
-                {/* Hidden File Input */}
-                <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    className="hidden" 
-                    accept=".pdf" 
-                    onChange={handleFileUpload}
-                />
+                        <input 
+                            type="file" 
+                            ref={fileInputRef} 
+                            className="hidden" 
+                            accept=".pdf" 
+                            onChange={handleFileUpload}
+                        />
 
-                {/* Quick Upload Button */}
-                <button 
-                  onClick={() => fileInputRef.current.click()}
-                  disabled={isUploading}
-                  className="w-full py-2 border border-dashed border-accent/50 rounded flex items-center justify-center gap-2 text-xs text-accent hover:bg-accent/10 transition-colors"
-                >
-                  {isUploading ? (
-                      <> <Loader2 size={14} className="animate-spin" /> Uploading...</>
-                  ) : uploadSuccess ? (
-                      <> <CheckCircle size={14} /> Resume Updated!</>
-                  ) : (
-                      <> <Upload size={14} /> Upload New Resume (PDF)</>
-                  )}
-                </button>
+                        <button 
+                          onClick={() => fileInputRef.current.click()}
+                          disabled={isUploading}
+                          className="w-full py-2 border border-dashed border-accent/50 rounded flex items-center justify-center gap-2 text-xs text-accent hover:bg-accent/10 transition-colors"
+                        >
+                          {isUploading ? (
+                              <> <Loader2 size={14} className="animate-spin" /> Uploading...</>
+                          ) : uploadSuccess ? (
+                              <> <CheckCircle size={14} /> Resume Updated!</>
+                          ) : (
+                              <> <Upload size={14} /> Upload New Resume (PDF)</>
+                          )}
+                        </button>
+                    </>
+                ) : (
+                    // OPTION B: GUEST USER (See Login CTA)
+                    <div className="text-center py-2">
+                        <div className="flex items-center justify-center gap-2 text-text-secondary mb-2 opacity-50">
+                            <input type="checkbox" disabled checked={false} />
+                            <span className="font-medium">Use Resume Context</span>
+                        </div>
+                        <p className="text-xs text-text-secondary mb-3">
+                            Log in to upload your resume and get personalized questions based on your experience.
+                        </p>
+                        <button 
+                            onClick={openLogin}
+                            className="w-full py-2 bg-accent/10 border border-accent/30 text-accent rounded flex items-center justify-center gap-2 text-sm font-bold hover:bg-accent hover:text-white transition-colors"
+                        >
+                            <LogIn size={16} /> Log In to Personalize
+                        </button>
+                    </div>
+                )}
               </div>
 
               <button
                 onClick={() => {
                   setShowSetup(false);
-                  // Optionally send a "Start" message silently to seed context
                   speak(`Okay, I'm ready to interview you for the ${targetRole} position at ${targetCompany}.`);
                 }}
                 className="w-full bg-accent hover:bg-accent-darker text-white font-bold py-3 rounded-lg transition-colors mt-2"
@@ -347,6 +374,14 @@ const BehavioralCoach = () => {
 
       {/* HEADER */}
       <header className="mb-4">
+        {/* <--- NEW: GUEST BANNER */}
+        {!isLoggedIn && (
+            <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 p-2 rounded-md mb-3 text-sm text-center flex items-center justify-center gap-2">
+                <AlertCircle size={16} />
+                <span>Guest Mode: Chat history will not be saved. <button onClick={openLogin} className="underline font-bold hover:text-blue-300">Log In</button></span>
+            </div>
+        )}
+
         <div className="flex justify-between items-start">
           <div>
             <h1 className="text-3xl font-bold text-text-primary">Behavioral Coach</h1>
@@ -354,13 +389,11 @@ const BehavioralCoach = () => {
               Role: <span className="text-accent">{targetRole}</span> | Company: <span className="text-accent">{targetCompany}</span>
             </p>
           </div>
-          {/* Settings Button to reopen setup */}
           <button onClick={() => setShowSetup(true)} className="p-2 text-text-secondary hover:text-accent">
             <Settings size={20} />
           </button>
         </div>
 
-        {/* Voice Controls */}
         <div className="flex justify-end mt-2">
           <div className="flex items-center gap-2">
             <Mic size={16} className="text-text-secondary" />

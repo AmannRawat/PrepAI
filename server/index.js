@@ -83,7 +83,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/ping', (req, res) => {
-  res.status(200).send('Pong');
+    res.status(200).send('Pong');
 });
 
 // User Signup Route
@@ -180,7 +180,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 // Route for generating problems (uses flashModel)
 // app.post('/api/generate-problem', async (req, res) => {
-app.post('/api/generate-problem', authMiddleware, async (req, res) => {
+app.post('/api/generate-problem', async (req, res) => {
     try {
         const { topic, difficulty } = req.body;
         if (!topic || !difficulty) {
@@ -276,7 +276,7 @@ app.post('/api/evaluate-code', authMiddleware, async (req, res) => {
     }
 });
 
-app.post('/api/behavioral-chat', authMiddleware, async (req, res) => {
+app.post('/api/behavioral-chat', async (req, res) => {
     try {
         //We now extract 'targetRole', 'targetCompany', and 'useResumeContext' too
         const { messages, targetRole, targetCompany, useResumeContext } = req.body;
@@ -331,9 +331,9 @@ app.post('/api/behavioral-chat', authMiddleware, async (req, res) => {
         // const systemPrompt = `
         //     You are "Aman", a professional hiring manager ${companyText}. 
         //     Your goal is to conduct a behavioral interview for ${roleText}.
-            
+
         //     ${resumeContext} 
-            
+
         //     CRITICAL RULES FOR INTERACTION:
         //     1. **BREVITY IS KEY:** Real humans speak in 1-3 sentences. NEVER write long paragraphs.
         //     2. **ONE QUESTION RULE:** Ask exactly ONE question. Wait for the user's answer.
@@ -427,13 +427,26 @@ app.post('/api/behavioral-chat', authMiddleware, async (req, res) => {
     }
 });
 
-app.post('/api/review-resume', authMiddleware, upload.single('resume'), async (req, res) => {
+app.post('/api/review-resume', upload.single('resume'), async (req, res) => {
     try {
         // Check if a file was actually uploaded
         if (!req.file) {
             return res.status(400).json({ error: 'No resume file uploaded.' });
         }
-        const userId = req.user.id;
+        // const userId = req.user.id;
+        let userId = null;
+        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+            try {
+                const token = req.headers.authorization.split(' ')[1];
+                if (token !== "null" && token !== "undefined") {
+                    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                    userId = decoded.user.id;
+                }
+            } catch (err) {
+                console.log("Guest user uploading resume.");
+            }
+        }
+
         console.log(`Reviewing resume for user: ${userId}`);
         //  Extract text from the PDF buffer using pdf-parse
         const data = await pdf(req.file.buffer);
@@ -473,17 +486,18 @@ app.post('/api/review-resume', authMiddleware, upload.single('resume'), async (r
         if (parsedResponse.error) {
             return res.status(400).json({ error: parsedResponse.error });
         }
-        const newReview = new ResumeReview({
-            user: req.user.id, // Get the user's ID from our authMiddleware
-            resumeText: resumeText, // <--- Saving the raw text for the Chatbot to use later!
-            atsAssessment: parsedResponse.atsAssessment,
-            strengths: parsedResponse.strengths,
-            areasForImprovement: parsedResponse.areasForImprovement,
-            actionVerbSuggestions: parsedResponse.actionVerbSuggestions,
-            quantificationSuggestions: parsedResponse.quantificationSuggestions
-        });
-        await newReview.save();
-
+        if (userId) {
+            const newReview = new ResumeReview({
+                user: userId, // Get the user's ID from our authMiddleware
+                resumeText: resumeText, // <--- Saving the raw text for the Chatbot to use later!
+                atsAssessment: parsedResponse.atsAssessment,
+                strengths: parsedResponse.strengths,
+                areasForImprovement: parsedResponse.areasForImprovement,
+                actionVerbSuggestions: parsedResponse.actionVerbSuggestions,
+                quantificationSuggestions: parsedResponse.quantificationSuggestions
+            });
+            await newReview.save();
+        }
         res.status(200).json(parsedResponse); // Send the structured feedback
 
     } catch (error) {

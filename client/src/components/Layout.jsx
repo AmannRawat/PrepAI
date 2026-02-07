@@ -4,19 +4,20 @@ import Sidebar from './Sidebar';
 import ThemeToggle from './ThemeToggle';
 import StreakCounter from './StreakCounter';
 import MobileNav from './MobileNav';
-import { useAuth } from '../context/AuthContext';
+import LoginModal from './LoginModal';
+// import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Layout = () => {
-  const { isLoggedIn } = useAuth(); //Get the user's login status from context
+  // const { isLoggedIn } = useAuth(); //Get the user's login status from context
   const location = useLocation();
   // Check if the user is logged in
-  if (!isLoggedIn) {
-    // If not logged in, redirect them to the /login page
-    return <Navigate to="/login" replace />;
-  }
+  // if (!isLoggedIn) {
+  //   // If not logged in, redirect them to the /login page
+  //   return <Navigate to="/login" replace />;
+  // }
 
-  // If logged in, show the layout with sidebar and main content
+  //  show the layout with sidebar and main content
   return (
     <div className="flex h-screen bg-background text-text-primary font-sans">
       {/* Persistent sidebar */}
@@ -25,9 +26,9 @@ const Layout = () => {
       {/* The main content area that will change based on the route */}
       <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto relative">
         <div className="flex justify-end gap-4 mb-4 md:mb-0 md:absolute md:top-6 md:right-8 z-20">
-              <StreakCounter />
-              <ThemeToggle />
-            </div>
+          <StreakCounter />
+          <ThemeToggle />
+        </div>
         {/* Add Animation Wrapper */}
         <AnimatePresence mode="wait">
           <motion.div
@@ -44,6 +45,7 @@ const Layout = () => {
         </AnimatePresence>
       </main>
       <MobileNav />
+      <LoginModal />
     </div>
 
   );

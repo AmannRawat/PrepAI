@@ -17,11 +17,12 @@ import babel from 'prettier/plugins/babel';
 import estree from 'prettier/plugins/estree';
 // import * as javaPlugin from "prettier-plugin-java";
 import { useAuth } from '../context/AuthContext';
+import { useModal } from '../context/ModalContext';
 import { CheckCircle, AlertCircle, AlertTriangle } from 'lucide-react';
 
-
 const DsaArena = () => {
-  const { token, refreshUserData } = useAuth();
+  const { token, refreshUserData, isLoggedIn } = useAuth();
+  const { openLogin } = useModal();
   //  Set up state to hold the code ---
   const [code, setCode] = useState(
     "function solve() {\n  // Your code here\n  console.log('Hello, PrepAI!');\n}"
@@ -80,11 +81,17 @@ const DsaArena = () => {
     setProblem(null);
     setFeedback(null);
     try {
+      // If we have a token, send it. If not, send an empty header object.
+      const config = token
+        ? { headers: { 'Authorization': `Bearer ${token}` } }
+        : {};
       const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/generate-problem`, { topic, difficulty }, {
         // Added Authorization header with the token
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        // headers: {
+        //   'Authorization': `Bearer ${token}`
+        // }
+
+        config
       });
       setProblem(response.data);
     } catch (err) {
@@ -97,6 +104,10 @@ const DsaArena = () => {
 
   //  function to handle code submission
   const handleCodeSubmission = async () => {
+    if (!isLoggedIn) {
+      openLogin(); // Trigger the popup!
+      return;      // Stop execution
+    }
     if (!problem) {
       setEvaluationError("Please generate a problem first.");
       return;
@@ -315,13 +326,13 @@ const DsaArena = () => {
                   <div className="space-y-4">
                     {/* Colored Status Box */}
                     <div className={`flex items-start gap-3 p-3 rounded-lg border ${status.bg} ${status.border}`}>
-                        <div className="mt-0.5">{status.icon}</div>
-                        <div>
-                            <h4 className={`font-bold ${status.color} mb-1`}>
-                                {status.type === 'success' ? 'Solution Correct' : status.type === 'error' ? 'Solution Incorrect' : 'Review Needed'}
-                            </h4>
-                            <p className="text-sm text-text-primary">{feedback.correctness}</p>
-                        </div>
+                      <div className="mt-0.5">{status.icon}</div>
+                      <div>
+                        <h4 className={`font-bold ${status.color} mb-1`}>
+                          {status.type === 'success' ? 'Solution Correct' : status.type === 'error' ? 'Solution Incorrect' : 'Review Needed'}
+                        </h4>
+                        <p className="text-sm text-text-primary">{feedback.correctness}</p>
+                      </div>
                     </div>
 
                     <div><h4 className="font-semibold text-text-primary mb-1">Time Complexity</h4><p className="text-sm">{feedback.timeComplexity}</p></div>
@@ -338,4 +349,4 @@ const DsaArena = () => {
   );
 };
 
-      export default DsaArena;
+export default DsaArena;

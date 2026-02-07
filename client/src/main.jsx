@@ -13,6 +13,7 @@ import ResumeReviewer from './pages/ResumeReviewer.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import SignupPage from './pages/SignupPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
+import { ModalProvider } from './context/ModalContext.jsx';
 
 // Define the application routes
 const router = createBrowserRouter([
@@ -36,7 +37,7 @@ const router = createBrowserRouter([
         path: "resume-reviewer",
         element: <ResumeReviewer />
       },
-     {
+      {
         path: "profile",
         element: <ProfilePage />
       }
@@ -56,7 +57,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ThemeProvider>
       <AuthProvider>
-        <RouterProvider router={router} />
+        <ModalProvider>
+          <RouterProvider router={router} />
+        </ModalProvider>
       </AuthProvider>
     </ThemeProvider>
   </React.StrictMode>,
