@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
-// This is the blueprint for our User data
+// This is the blueprint/schema for our User data
 const userSchema = new mongoose.Schema({
     name: {
         type: String,
@@ -22,7 +22,7 @@ const userSchema = new mongoose.Schema({
     },
     currentStreak: {
         type: Number,
-        default: 0 // Start all users at 0
+        default: 10 // Start all users at 0
     },
     lastActivityDate: {
         type: Date

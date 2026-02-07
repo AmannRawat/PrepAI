@@ -27,7 +27,6 @@ const PORT = process.env.PORT || 8000;
 
 const app = express();
 // Middleware
-// app.use(cors());
 app.use(cors({
     // In production, this set FRONTEND_URL in Vercel.
     // Locally, it defaults to localhost.
@@ -58,15 +57,14 @@ function extractJson(text) {
     let jsonString = text.substring(startIndex, endIndex + 1);
 
     try {
-        // Attempt 1: Try parsing directly
+        // Attempt 1: Trying parsing directly
         return JSON.parse(jsonString);
     } catch (e1) {
         console.warn("Initial JSON parsing failed. Attempting cleanup...", e1.message);
         try {
-            // Attempt 2: Try replacing common issues like single quotes for keys
+            // Attempt 2: Trying replacing common issues like single quotes for keys
             // This regex specifically targets 'key': patterns common at the start of lines or after commas/braces
             jsonString = jsonString.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":');
-            // Attempt to fix trailing commas (optional, but can help)
             jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
 
             return JSON.parse(jsonString);
@@ -82,6 +80,10 @@ function extractJson(text) {
 // Routes
 app.get('/', (req, res) => {
     res.status(200).json({ message: "PrepAI Backend is running!" });
+});
+
+app.get('/ping', (req, res) => {
+  res.status(200).send('Pong');
 });
 
 // User Signup Route
