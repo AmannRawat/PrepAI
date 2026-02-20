@@ -17,7 +17,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 // Initializing the SDK with API key from the .env file
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // Model for fast tasks like problem generation
-const flashModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const flashModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 //  More powerful model for complex reasoning like code evaluation
 const proModel = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
 const storage = multer.memoryStorage(); // Store files in memory
