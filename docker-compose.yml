@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  # 1. The Backend Service
+  backend:
+    build: ./server                # Tells Docker to look in the /server folder for the Dockerfile
+    container_name: prepai-server
+    ports:
+      - "8000:8000"                # Maps host port 8000 to container port 8000
+    env_file:
+      - ./server/.env              # Automatically injects your MongoDB URI and API keys!
+    restart: unless-stopped        # If the server crashes, Docker will try to restart it
+
+  # 2. The Frontend Service
+  frontend:
+    build: ./client                # Tells Docker to look in the /client folder for the Dockerfile
+    container_name: prepai-client
+    ports:
+      - "5173:5173"                # Maps host port 5173 to container port 5173
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend                    # Ensures the backend boots up BEFORE the frontend starts
+    restart: unless-stopped
