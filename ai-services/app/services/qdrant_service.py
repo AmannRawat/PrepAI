@@ -28,6 +28,9 @@ def store_embedding(
     point_id: str,
     vector: list[float],
     text: str,
+    document_id: str,
+    filename: str,
+    chunk_index: int,
 ):
     client.upsert(
         collection_name=COLLECTION_NAME,
@@ -37,6 +40,9 @@ def store_embedding(
                 vector=vector,
                 payload={
                     "text": text,
+                    "document_id": document_id,
+                    "filename": filename,
+                    "chunk_index": chunk_index,
                 },
             )
         ],

@@ -1,10 +1,14 @@
-from fastapi import APIRouter
+import uuid
 
+from fastapi import APIRouter, File, UploadFile
+
+from app.services.document_service import (
+    extract_pdf_text,
+    chunk_text,
+)
 from app.services.gemini import generate_text
-from app.services.rag_service import ingest_text, retrieve_context
-    
 from app.services.rag_service import (
-    ingest_text,
+    ingest_chunks,
     retrieve_context,
     generate_rag_answer,
 )
@@ -19,15 +23,15 @@ async def test_gemini():
         "Say hello from the PrepAI AI service."
     )
 
-    return {
-        "response": response
-    }
+    return {"response": response}
 
 
 @router.post("/test-ingest")
 async def test_ingest():
-    return ingest_text(
-        "Binary search works on sorted data and has O(log n) time complexity."
+    return ingest_chunks(
+        [
+            "Binary search works on sorted data and has O(log n) time complexity."
+        ]
     )
 
 
@@ -37,6 +41,33 @@ async def test_retrieval(query: str):
         "query": query,
         "results": retrieve_context(query),
     }
+
+
+@router.post("/upload-pdf")
+async def upload_pdf(file: UploadFile = File(...)):
+    file_bytes = await file.read()
+
+    text = extract_pdf_text(file_bytes)
+
+    chunks = chunk_text(text)
+
+    document_id = str(uuid.uuid4())
+
+    result = ingest_chunks(
+        chunks=chunks,
+        document_id=document_id,
+        filename=file.filename,
+    )
+
+    return {
+        "document_id": document_id,
+        "filename": file.filename,
+        "characters_extracted": len(text),
+        "chunks_created": len(chunks),
+        **result,
+    }
+
+
 @router.get("/rag")
 async def rag(query: str):
     return generate_rag_answer(query)
