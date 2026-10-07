@@ -1,10 +1,15 @@
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
-
+from qdrant_client.models import (
+    Distance,
+    VectorParams,
+    PointStruct,
+    Filter,
+    FieldCondition,
+    MatchValue,
+)
 
 QDRANT_URL = "http://localhost:6333"
 COLLECTION_NAME = "prepai_knowledge"
-
 
 client = QdrantClient(url=QDRANT_URL)
 
@@ -49,10 +54,22 @@ def store_embedding(
     )
 
 
-def search_similar(vector: list[float], limit: int = 3):
+def search_similar(
+    vector: list[float],
+    document_id: str,
+    limit: int = 3,
+):
     results = client.query_points(
         collection_name=COLLECTION_NAME,
         query=vector,
+        query_filter=Filter(
+            must=[
+                FieldCondition(
+                    key="document_id",
+                    match=MatchValue(value=document_id),
+                )
+            ]
+        ),
         limit=limit,
     )
 
@@ -60,6 +77,9 @@ def search_similar(vector: list[float], limit: int = 3):
         {
             "text": point.payload["text"],
             "score": point.score,
+            "document_id": point.payload["document_id"],
+            "filename": point.payload["filename"],
+            "chunk_index": point.payload["chunk_index"],
         }
         for point in results.points
     ]

@@ -29,9 +29,11 @@ async def test_gemini():
 @router.post("/test-ingest")
 async def test_ingest():
     return ingest_chunks(
-        [
+        chunks=[
             "Binary search works on sorted data and has O(log n) time complexity."
-        ]
+        ],
+        document_id=str(uuid.uuid4()),
+        filename="test.txt",
     )
 
 
@@ -69,5 +71,11 @@ async def upload_pdf(file: UploadFile = File(...)):
 
 
 @router.get("/rag")
-async def rag(query: str):
-    return generate_rag_answer(query)
+async def rag(
+    query: str,
+    document_id: str,
+):
+    return generate_rag_answer(
+        query=query,
+        document_id=document_id,
+    )

@@ -57,16 +57,28 @@ def ingest_chunks(
         "chunks_stored": stored_chunks,
     }
     
-def retrieve_context(query: str):
+def retrieve_context(
+    query: str,
+    document_id: str,
+):
     query_embedding = create_embedding(query)
 
-    results = search_similar(query_embedding)
+    results = search_similar(
+        query_embedding,
+        document_id=document_id,
+    )
 
     return results
 
 
-def generate_rag_answer(query: str):
-    results = retrieve_context(query)
+def generate_rag_answer(
+    query: str,
+    document_id: str,
+):
+    results = retrieve_context(
+        query=query,
+        document_id=document_id,
+    )
 
     context = "\n\n".join(
         result["text"]
@@ -76,12 +88,12 @@ def generate_rag_answer(query: str):
     prompt = f"""
 You are PrepAI, an AI interview preparation assistant.
 
-Answer the user's question using the provided context.
+Answer the user's question using the provided resume context.
 
-If the context does not contain enough information to answer,
+If the context does not contain enough information,
 say that you don't have enough information.
 
-Context:
+Resume context:
 {context}
 
 User question:
