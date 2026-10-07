@@ -2,6 +2,8 @@ import uuid
 
 from fastapi import APIRouter, File, UploadFile
 
+from app.schemas.ai_schemas import ResumeUploadResponse
+
 from app.services.document_service import (
     extract_pdf_text,
     chunk_text,
@@ -45,7 +47,10 @@ async def test_retrieval(query: str):
     }
 
 
-@router.post("/upload-pdf")
+@router.post(
+    "/upload-pdf",
+    response_model=ResumeUploadResponse,
+)
 async def upload_pdf(file: UploadFile = File(...)):
     file_bytes = await file.read()
 
@@ -79,3 +84,4 @@ async def rag(
         query=query,
         document_id=document_id,
     )
+    
