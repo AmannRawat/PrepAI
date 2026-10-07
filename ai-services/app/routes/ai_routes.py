@@ -2,7 +2,6 @@ import uuid
 
 from fastapi import APIRouter, File, UploadFile
 
-from app.schemas.ai_schemas import ResumeUploadResponse
 
 from app.services.document_service import (
     extract_pdf_text,
@@ -13,6 +12,15 @@ from app.services.rag_service import (
     ingest_chunks,
     retrieve_context,
     generate_rag_answer,
+)
+from app.schemas.ai_schemas import (
+    ResumeUploadResponse,
+    InterviewRequest,
+    InterviewResponse,
+)
+
+from app.services.interview_service import (
+    generate_interview_response,
 )
 
 
@@ -83,5 +91,18 @@ async def rag(
     return generate_rag_answer(
         query=query,
         document_id=document_id,
+    )
+    
+@router.post(
+    "/interview",
+    response_model=InterviewResponse,
+)
+async def interview(
+    request: InterviewRequest,
+):
+    return generate_interview_response(
+        document_id=request.document_id,
+        question=request.question,
+        answer=request.answer,
     )
     

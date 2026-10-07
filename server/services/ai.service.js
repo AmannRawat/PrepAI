@@ -1,12 +1,14 @@
 const AI_SERVICE_URL =
   process.env.AI_SERVICE_URL || "http://localhost:9000";
 
-async function uploadResume(file) {
+export async function uploadResume(file) {
   const formData = new FormData();
 
   const blob = new Blob(
     [file.buffer],
-    { type: file.mimetype }
+    {
+      type: file.mimetype,
+    }
   );
 
   formData.append(
@@ -34,7 +36,8 @@ async function uploadResume(file) {
   return response.json();
 }
 
-async function retrieveResumeContext(
+
+export async function retrieveResumeContext(
   query,
   documentId
 ) {
@@ -58,7 +61,35 @@ async function retrieveResumeContext(
   return response.json();
 }
 
-module.exports = {
-  uploadResume,
-  retrieveResumeContext,
-};
+export async function generateInterviewResponse(
+  documentId,
+  question,
+  answer
+) {
+  const response = await fetch(
+    `${AI_SERVICE_URL}/interview`,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify({
+        document_id: documentId,
+        question,
+        answer,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+
+    throw new Error(
+      `AI service error: ${response.status} ${errorText}`
+    );
+  }
+
+  return response.json();
+}
