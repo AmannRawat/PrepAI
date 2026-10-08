@@ -1,5 +1,5 @@
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
 // This is the blueprint/schema for our User data
 const userSchema = new mongoose.Schema({
@@ -26,17 +26,21 @@ const userSchema = new mongoose.Schema({
     },
     lastActivityDate: {
         type: Date
+    },
+    resumeDocumentId: {
+        type: String,
+        default: null
     }
 }, {
     // Adds 'createdAt' and 'updatedAt' timestamps automatically
-    timestamps: true 
+    timestamps: true
 });
 
 //  Password Hashing Middleware
 // This function runs automatically *before* a new user is saved
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
     // 'this' refers to the user document about to be saved
-    
+
     // We only hash the password if it's new or has been modified
     if (!this.isModified('password')) {
         return next();
@@ -56,4 +60,4 @@ userSchema.pre('save', async function(next) {
 // This creates the 'User' model (which will use the 'users' collection in MongoDB)
 const User = mongoose.model('User', userSchema);
 
-module.exports = User;
+export default User;

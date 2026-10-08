@@ -1,5 +1,5 @@
 // backend/models/DsaSubmission.model.js
-const mongoose = require('mongoose');
+import mongoose from "mongoose";
 const { Schema } = mongoose;
 
 const dsaSubmissionSchema = new Schema({
@@ -34,4 +34,4 @@ const dsaSubmissionSchema = new Schema({
 });
 
 const DsaSubmission = mongoose.model('DsaSubmission', dsaSubmissionSchema);
-module.exports = DsaSubmission;
+export default DsaSubmission;

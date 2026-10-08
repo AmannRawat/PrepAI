@@ -1,19 +1,24 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
-const pdf = require('pdf-parse');
-const mongoose = require('mongoose');
-const User = require('./models/User.model.js');
-const ResumeReview = require('./models/ResumeReview.model.js'); //causing error
-const ChatSession = require('./models/BehavioralChat.model.js');
-const DsaSubmission = require('./models/DsaSubmission.model.js');
-const authMiddleware = require('./middleware/auth.middleware.js');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
+import "dotenv/config";
 
+import express from "express";
+import cors from "cors";
+import multer from "multer";
+import mongoose from "mongoose";
+import { connectDB } from "./config/db.js";
+
+import User from "./models/User.model.js";
+import ResumeReview from "./models/ResumeReview.model.js";
+import ChatSession from "./models/BehavioralChat.model.js";
+import DsaSubmission from "./models/DsaSubmission.model.js";
+
+import authMiddleware from "./middleware/auth.middleware.js";
+import { extractJson } from "./utils/extractJson.js";
 // Importing and configure the Google Gemini SDK
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+import { uploadResume } from "./services/ai.service.js";
+import { generateInterviewResponse } from "./services/ai.service.js";
+
 // Initializing the SDK with API key from the .env file
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // Model for fast tasks like problem generation
@@ -38,44 +43,6 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
-
-//MONGO DB CONNECTION
-mongoose.connect(process.env.DATABASE_URL)
-    .then(() => console.log('Successfully connected to MongoDB Atlas!'))
-    .catch((error) => console.error('Error connecting to MongoDB Atlas:', error));
-
-// A helper function to find and parse JSON from a string
-function extractJson(text) {
-    // Find the start and end of the potential JSON object
-    const startIndex = text.indexOf('{');
-    const endIndex = text.lastIndexOf('}');
-
-    if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
-        throw new Error("No valid JSON object found in the AI response.");
-    }
-
-    let jsonString = text.substring(startIndex, endIndex + 1);
-
-    try {
-        // Attempt 1: Trying parsing directly
-        return JSON.parse(jsonString);
-    } catch (e1) {
-        console.warn("Initial JSON parsing failed. Attempting cleanup...", e1.message);
-        try {
-            // Attempt 2: Trying replacing common issues like single quotes for keys
-            // This regex specifically targets 'key': patterns common at the start of lines or after commas/braces
-            jsonString = jsonString.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":');
-            jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
-
-            return JSON.parse(jsonString);
-        } catch (e2) {
-            console.error("Failed to parse extracted JSON even after cleanup:", e2);
-            console.error("Problematic JSON string:", jsonString); // Log the string that failed
-            throw new Error("Invalid JSON format in the AI response even after cleanup.");
-        }
-    }
-}
-
 
 // Routes
 app.get('/', (req, res) => {
@@ -276,7 +243,7 @@ app.post('/api/evaluate-code', authMiddleware, async (req, res) => {
     }
 });
 
-app.post('/api/behavioral-chat', async (req, res) => {
+app.post('/api/behavioral-chat', authMiddleware, async (req, res) => {
     try {
         //We now extract 'targetRole', 'targetCompany', and 'useResumeContext' too
         const { messages, targetRole, targetCompany, useResumeContext } = req.body;
@@ -284,6 +251,16 @@ app.post('/api/behavioral-chat', async (req, res) => {
         if (!messages || messages.length === 0) {
             return res.status(400).json({ error: 'Chat history is required.' });
         }
+
+        const user = await User.findById(req.user.id);
+
+        if (!user) {
+            return res.status(404).json({
+                error: "User not found."
+            });
+        }
+
+        const documentId = user.resumeDocumentId;
 
         //  Logic to handle Resume Context based on user preference
         let resumeContext = "";
@@ -328,26 +305,6 @@ app.post('/api/behavioral-chat', async (req, res) => {
             10. Your very final message (either the summary or the polite closing) MUST end with the special token: [SESSION_END]
             11. Never break character. Your responses should be conversational and professional.
         `;
-        // const systemPrompt = `
-        //     You are "Aman", a professional hiring manager ${companyText}. 
-        //     Your goal is to conduct a behavioral interview for ${roleText}.
-
-        //     ${resumeContext} 
-
-        //     CRITICAL RULES FOR INTERACTION:
-        //     1. **BREVITY IS KEY:** Real humans speak in 1-3 sentences. NEVER write long paragraphs.
-        //     2. **ONE QUESTION RULE:** Ask exactly ONE question. Wait for the user's answer.
-        //     3. **PERSONALIZE:** - Use the candidate's Resume (if provided) to ask about specific projects.
-        //        - Tailor questions to ${companyText}'s specific culture/values (e.g., "Customer Obsession" for Amazon, "Move Fast" for Meta).
-        //     4. **THE LOOP:** - Ask a question.
-        //        - If the answer is vague, ask a clarifying follow-up (e.g., "What was YOUR specific role?").
-        //        - If the answer is good, give 1 sentence of STAR-based feedback, then move to the next question.
-        //     5. **THE CLOSING:** - When user sends "USER_ACTION: End interview", ask: "Interview done. Want a feedback summary?"
-        //        - If "Yes": Provide a detailed STAR report. 
-        //        - If "No": Say goodbye.
-        //        - ALWAYS End the final message with: [SESSION_END]
-        //     6. **TONE:** Professional but conversational. Do not be a robot.
-        // `;
 
         //More Strict Version
         const systemPrompt = `
@@ -401,8 +358,21 @@ app.post('/api/behavioral-chat', async (req, res) => {
 
         //  Send the last message from the user to the AI
         const lastUserMessage = messages[messages.length - 1].text;
-        const result = await chat.sendMessage(lastUserMessage);
-        const responseText = result.response.text();
+        const previousAiMessage = messages
+            .slice(0, -1)
+            .reverse()
+            .find(message => message.sender === 'ai');
+
+        const currentQuestion =
+            previousAiMessage?.text || '';
+
+        const aiResult = await generateInterviewResponse(
+            documentId,
+            currentQuestion,
+            lastUserMessage
+        );
+
+        const responseText = aiResult.response;
 
         if (responseText.includes("[SESSION_END]")) {
             // The AI is about to send its final message. Save the whole chat.
@@ -427,25 +397,30 @@ app.post('/api/behavioral-chat', async (req, res) => {
     }
 });
 
-app.post('/api/review-resume', upload.single('resume'), async (req, res) => {
+app.post('/api/review-resume', authMiddleware, upload.single('resume'), async (req, res) => {
     try {
         // Check if a file was actually uploaded
         if (!req.file) {
             return res.status(400).json({ error: 'No resume file uploaded.' });
         }
-        // const userId = req.user.id;
-        let userId = null;
-        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-            try {
-                const token = req.headers.authorization.split(' ')[1];
-                if (token !== "null" && token !== "undefined") {
-                    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                    userId = decoded.user.id;
-                }
-            } catch (err) {
-                console.log("Guest user uploading resume.");
+        // Get user ID from authMiddleware
+        const userId = req.user.id;
+        // Send PDF to FastAPI → chunk → embed → Qdrant
+        const { uploadResume } = await import(
+            './services/ai.service.js'
+        );
+
+        const ragResult = await uploadResume(req.file);
+
+        console.log("RAG indexing result:", ragResult);
+
+        // Store Qdrant document ID against the userF
+        await User.findByIdAndUpdate(
+            userId,
+            {
+                resumeDocumentId: ragResult.document_id
             }
-        }
+        );
 
         console.log(`Reviewing resume for user: ${userId}`);
         //  Extract text from the PDF buffer using pdf-parse
@@ -490,6 +465,7 @@ app.post('/api/review-resume', upload.single('resume'), async (req, res) => {
             const newReview = new ResumeReview({
                 user: userId, // Get the user's ID from our authMiddleware
                 resumeText: resumeText, // <--- Saving the raw text for the Chatbot to use later!
+                documentId: ragResult.document_id,
                 atsAssessment: parsedResponse.atsAssessment,
                 strengths: parsedResponse.strengths,
                 areasForImprovement: parsedResponse.areasForImprovement,
@@ -594,6 +570,9 @@ app.post('/api/user/record-activity', authMiddleware, async (req, res) => {
         res.status(500).json({ message: "Server error recording activity." });
     }
 });
+
+// MongoDB Connection
+await connectDB();
 
 // Start the Server
 app.listen(PORT, () => {

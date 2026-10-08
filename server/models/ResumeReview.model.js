@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from "mongoose";
 const { Schema } = mongoose;
 
 const reviewSchema = new Schema({
@@ -7,6 +7,10 @@ const reviewSchema = new Schema({
         type: Schema.Types.ObjectId,
         ref: 'User', // This links it to our User model
         required: true
+    },
+    documentId: {
+        type: String,
+        default: null
     },
     // Store the feedback we got from the AI
     atsAssessment: {
@@ -22,4 +26,4 @@ const reviewSchema = new Schema({
 });
 
 const ResumeReview = mongoose.model('ResumeReview', reviewSchema);
-module.exports = ResumeReview;
+export default ResumeReview;
