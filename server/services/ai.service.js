@@ -63,8 +63,11 @@ export async function retrieveResumeContext(
 
 export async function generateInterviewResponse(
   documentId,
-  question,
-  answer
+    question,
+    answer,
+    targetRole,
+    targetCompany,
+    useResumeContext
 ) {
   const response = await fetch(
     `${AI_SERVICE_URL}/interview`,
@@ -76,9 +79,12 @@ export async function generateInterviewResponse(
       },
 
       body: JSON.stringify({
-        document_id: documentId,
-        question,
-        answer,
+           document_id: documentId,
+            question,
+            answer,
+            target_role: targetRole,
+            target_company: targetCompany,
+            use_resume_context: useResumeContext,
       }),
     }
   );

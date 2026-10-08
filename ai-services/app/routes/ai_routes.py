@@ -100,9 +100,11 @@ async def rag(
 async def interview(
     request: InterviewRequest,
 ):
-    return generate_interview_response(
-        document_id=request.document_id,
-        question=request.question,
-        answer=request.answer,
-    )
-    
+ return generate_interview_response(
+    document_id=request.document_id,
+    question=request.question,
+    answer=request.answer,
+    target_role=request.target_role,
+    target_company=request.target_company,
+    use_resume_context=request.use_resume_context,
+)

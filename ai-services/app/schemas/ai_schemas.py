@@ -13,6 +13,9 @@ class InterviewRequest(BaseModel):
     document_id: str
     question: str
     answer: str
+    target_role: str | None = None
+    target_company: str | None = None
+    use_resume_context: bool = True
 
 
 class InterviewResponse(BaseModel):
