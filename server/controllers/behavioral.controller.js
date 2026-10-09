@@ -2,7 +2,7 @@ import User from "../models/User.model.js";
 import ChatSession from "../models/BehavioralChat.model.js";
 
 import { generateInterviewResponse } from "../services/ai.service.js";
-
+import { getMemoryContext } from "../services/memory.service.js";
 export async function behavioralChat(req, res) {
     try {
         const {
@@ -41,13 +41,18 @@ export async function behavioralChat(req, res) {
         const currentQuestion =
             previousAiMessage?.text || "";
 
+        const memoryContext = await getMemoryContext(
+            req.user.id
+        );
+
         const aiResult = await generateInterviewResponse(
             documentId,
             currentQuestion,
             lastUserMessage,
             targetRole,
             targetCompany,
-            useResumeContext
+            useResumeContext,
+            memoryContext
         );
 
         const responseText = aiResult.response;

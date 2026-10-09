@@ -7,3 +7,4 @@ python-dotenv
 qdrant-client
 pypdf
 python-multipart
+langgraph

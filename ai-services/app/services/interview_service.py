@@ -9,6 +9,7 @@ def generate_interview_response(
     target_role: str | None = None,
     target_company: str | None = None,
     use_resume_context: bool = True,
+    memory_context: str = "",
 ):
     retrieval_query = f"""
 Interview question:
@@ -50,6 +51,9 @@ You are interviewing a candidate for the position of: {role_text}.
 *** CRITICAL CONTEXT - CANDIDATE RESUME ***
 {context}
 *******************************************
+*** CANDIDATE MEMORY ***
+{memory_context}
+************************
 
 **STRICT INSTRUCTIONS:**
 

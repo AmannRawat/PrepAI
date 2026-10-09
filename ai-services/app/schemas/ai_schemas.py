@@ -16,6 +16,7 @@ class InterviewRequest(BaseModel):
     target_role: str | None = None
     target_company: str | None = None
     use_resume_context: bool = True
+    memory_context: str = ""
 
 
 class InterviewResponse(BaseModel):

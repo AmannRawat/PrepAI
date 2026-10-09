@@ -63,11 +63,12 @@ export async function retrieveResumeContext(
 
 export async function generateInterviewResponse(
   documentId,
-    question,
-    answer,
-    targetRole,
-    targetCompany,
-    useResumeContext
+  question,
+  answer,
+  targetRole,
+  targetCompany,
+  useResumeContext,
+  memoryContext
 ) {
   const response = await fetch(
     `${AI_SERVICE_URL}/interview`,
@@ -79,12 +80,13 @@ export async function generateInterviewResponse(
       },
 
       body: JSON.stringify({
-           document_id: documentId,
-            question,
-            answer,
-            target_role: targetRole,
-            target_company: targetCompany,
-            use_resume_context: useResumeContext,
+        document_id: documentId,
+        question,
+        answer,
+        target_role: targetRole,
+        target_company: targetCompany,
+        use_resume_context: useResumeContext,
+        memory_context: memoryContext,
       }),
     }
   );
@@ -101,32 +103,32 @@ export async function generateInterviewResponse(
 }
 
 export async function extractMemories(
-    question,
-    answer,
-    evaluation
+  question,
+  answer,
+  evaluation
 ) {
-    const response = await fetch(
-        `${AI_SERVICE_URL}/extract-memories`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                question,
-                answer,
-                evaluation,
-            }),
-        }
-    );
-
-    if (!response.ok) {
-        const errorText = await response.text();
-
-        throw new Error(
-            `AI memory service error: ${response.status} ${errorText}`
-        );
+  const response = await fetch(
+    `${AI_SERVICE_URL}/extract-memories`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        question,
+        answer,
+        evaluation,
+      }),
     }
+  );
 
-    return response.json();
+  if (!response.ok) {
+    const errorText = await response.text();
+
+    throw new Error(
+      `AI memory service error: ${response.status} ${errorText}`
+    );
+  }
+
+  return response.json();
 }
