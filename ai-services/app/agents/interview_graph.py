@@ -2,12 +2,13 @@ from typing import TypedDict
 import sqlite3
 
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import interrupt, Command
+from langgraph.types import interrupt
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from app.services.rag_service import retrieve_context
 from app.services.interview_service import generate_interview_response
 from app.services.gemini import generate_text
+from app.services.memory_service import extract_memories
 
 
 class InterviewState(TypedDict):
@@ -33,6 +34,7 @@ class InterviewState(TypedDict):
     interview_history: list[dict]
 
     final_report: str
+    memories: list[dict]
 
 
 def load_context(state: InterviewState):
@@ -125,6 +127,20 @@ Return a concise evaluation.
 
     return {
         "evaluation": evaluation.strip()
+    }
+
+
+def extract_interview_memories(state: InterviewState):
+    print("Extracting interview memories...")
+
+    result = extract_memories(
+        question=state["current_question"],
+        answer=state["candidate_answer"],
+        evaluation=state["evaluation"],
+    )
+
+    return {
+        "memories": result.get("memories", [])
     }
 
 
@@ -357,6 +373,11 @@ graph_builder.add_node(
 )
 
 graph_builder.add_node(
+    "extract_interview_memories",
+    extract_interview_memories,
+)
+
+graph_builder.add_node(
     "update_interview_history",
     update_interview_history,
 )
@@ -399,6 +420,11 @@ graph_builder.add_edge(
 
 graph_builder.add_edge(
     "evaluate_answer",
+    "extract_interview_memories",
+)
+
+graph_builder.add_edge(
+    "extract_interview_memories",
     "update_interview_history",
 )
 

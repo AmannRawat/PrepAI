@@ -132,3 +132,55 @@ export async function extractMemories(
 
   return response.json();
 }
+
+export async function startInterview(data) {
+    const response = await fetch(
+        `${AI_SERVICE_URL}/interview/start`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(data),
+        }
+    );
+
+    if (!response.ok) {
+        const errorText = await response.text();
+
+        throw new Error(
+            `AI interview service error: ${response.status} ${errorText}`
+        );
+    }
+
+    return response.json();
+}
+
+
+export async function submitInterviewAnswer(
+    sessionId,
+    answer
+) {
+    const response = await fetch(
+        `${AI_SERVICE_URL}/interview/${sessionId}/answer`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                answer,
+            }),
+        }
+    );
+
+    if (!response.ok) {
+        const errorText = await response.text();
+
+        throw new Error(
+            `AI interview service error: ${response.status} ${errorText}`
+        );
+    }
+
+    return response.json();
+}

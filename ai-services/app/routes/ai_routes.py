@@ -144,47 +144,39 @@ async def extract_memories_endpoint(
 
 # Start a new LangGraph interview session
 @router.post("/interview/start")
-async def start_interview(
-    request: StartInterviewRequest,
-):
+async def start_interview(request: StartInterviewRequest):
     config = {
         "configurable": {
-            "thread_id": request.session_id
+            "thread_id": request.session_id,
         }
     }
 
     result = interview_graph.invoke(
         {
             "session_id": request.session_id,
-
             "user_id": request.user_id,
             "document_id": request.document_id,
-
             "target_role": request.target_role,
             "target_company": request.target_company,
-
             "resume_context": "",
             "memory_context": request.memory_context,
-
             "current_question": request.first_question,
             "candidate_answer": "",
-
             "evaluation": "",
             "next_action": "",
-
             "interview_response": "",
             "sources": [],
-
             "interview_history": [],
-
             "final_report": "",
+            "memories": [],
         },
         config=config,
     )
 
     return {
         "session_id": request.session_id,
-        "result": result,
+        "status": "waiting_for_answer",
+        "question": request.first_question,
     }
 
 
@@ -196,21 +188,33 @@ async def submit_interview_answer(
 ):
     config = {
         "configurable": {
-            "thread_id": session_id
+            "thread_id": session_id,
         }
     }
 
     try:
         result = interview_graph.invoke(
-            Command(
-                resume=request.answer
-            ),
+            Command(resume=request.answer),
             config=config,
         )
 
+        # Interview finished
+        if result.get("final_report"):
+            return {
+                "session_id": session_id,
+                "status": "completed",
+                "final_report": result["final_report"],
+                "memories": result.get("memories", []),
+            }
+
+        # Interview continues
+        question = result.get("current_question")
+
         return {
             "session_id": session_id,
-            "result": result,
+            "status": "waiting_for_answer",
+            "question": question,
+            "memories": result.get("memories", []),
         }
 
     except Exception as error:

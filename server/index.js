@@ -10,6 +10,7 @@ import dsaRoutes from "./routes/dsa.routes.js";
 import resumeRoutes from "./routes/resume.routes.js";
 import behavioralRoutes from "./routes/behavioral.routes.js";
 import userRoutes from "./routes/user.routes.js";
+import interviewRoutes from "./routes/interview.routes.js";
 
 const PORT = process.env.PORT || 8000;
 
@@ -48,6 +49,7 @@ app.use("/api", resumeRoutes);
 //ROUTE TO GET USER PROGRESS FOR DASHBOARD 
 app.use("/api/user", userRoutes);
 
+app.use("/api/interview", interviewRoutes);
 
 // MongoDB Connection
 await connectDB();
