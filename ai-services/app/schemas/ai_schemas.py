@@ -21,3 +21,12 @@ class InterviewRequest(BaseModel):
 class InterviewResponse(BaseModel):
     response: str
     sources: list[dict]
+
+class MemoryExtractionRequest(BaseModel):
+    question: str
+    answer: str
+    evaluation: str
+
+
+class MemoryExtractionResponse(BaseModel):
+    memories: list[dict]

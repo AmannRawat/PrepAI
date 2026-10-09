@@ -23,6 +23,11 @@ from app.services.interview_service import (
     generate_interview_response,
 )
 
+from app.services.memory_service import extract_memories
+from app.schemas.ai_schemas import (
+    MemoryExtractionRequest,
+    MemoryExtractionResponse,
+)
 
 router = APIRouter()
 
@@ -108,3 +113,7 @@ async def interview(
     target_company=request.target_company,
     use_resume_context=request.use_resume_context,
 )
+ 
+@router.post( "/extract-memories", response_model=MemoryExtractionResponse)
+async def extract_memories_endpoint(request: MemoryExtractionRequest):
+    return extract_memories(question=request.question, answer=request.answer, evaluation=request.evaluation,)

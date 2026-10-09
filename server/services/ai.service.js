@@ -99,3 +99,34 @@ export async function generateInterviewResponse(
 
   return response.json();
 }
+
+export async function extractMemories(
+    question,
+    answer,
+    evaluation
+) {
+    const response = await fetch(
+        `${AI_SERVICE_URL}/extract-memories`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                question,
+                answer,
+                evaluation,
+            }),
+        }
+    );
+
+    if (!response.ok) {
+        const errorText = await response.text();
+
+        throw new Error(
+            `AI memory service error: ${response.status} ${errorText}`
+        );
+    }
+
+    return response.json();
+}
