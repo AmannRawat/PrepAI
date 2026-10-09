@@ -31,3 +31,19 @@ class MemoryExtractionRequest(BaseModel):
 
 class MemoryExtractionResponse(BaseModel):
     memories: list[dict]
+
+class StartInterviewRequest(BaseModel):
+    session_id: str
+    user_id: str
+    document_id: str
+
+    target_role: str | None = None
+    target_company: str | None = None
+
+    memory_context: str = ""
+
+    first_question: str
+
+
+class InterviewAnswerRequest(BaseModel):
+    answer: str
