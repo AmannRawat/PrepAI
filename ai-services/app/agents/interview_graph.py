@@ -3,7 +3,7 @@ from typing import TypedDict
 from langgraph.graph import StateGraph, START, END
 
 from app.services.rag_service import retrieve_context
-
+from app.services.interview_service import generate_interview_response
 class InterviewState(TypedDict):
     user_id: str
     document_id: str
@@ -19,6 +19,9 @@ class InterviewState(TypedDict):
 
     evaluation: str
     next_action: str
+    
+    interview_response: str
+    sources: list[dict]
 
     final_report: str
 
@@ -31,7 +34,12 @@ def load_context(state: InterviewState):
 
     if state["document_id"]:
         resume_results = retrieve_context(
-            query="technical skills, projects, experience, and technologies relevant to the interview",
+            query=(
+                f"Interview for {state['target_role'] or 'software engineering'} "
+                f"at {state['target_company'] or 'a company'}. "
+                "Retrieve relevant resume skills, projects, experience, "
+                "and technologies."
+            ),
             document_id=state["document_id"],
         )
 
@@ -40,22 +48,28 @@ def load_context(state: InterviewState):
         for result in resume_results
     )
 
-    # Memory retrieval will be connected to MongoDB next.
-    memory_context = ""
-
     return {
         "resume_context": resume_context,
-        "memory_context": memory_context,
+        "memory_context": state["memory_context"],
     }
+    
+def interview_turn(state: InterviewState):
+    print("Running interview turn...")
 
-
-def generate_question(state: InterviewState):
-    print("Generating interview question...")
+    result = generate_interview_response(
+        document_id=state["document_id"],
+        question=state["current_question"],
+        answer=state["candidate_answer"],
+        target_role=state["target_role"],
+        target_company=state["target_company"],
+        use_resume_context=True,
+        memory_context=state["memory_context"],
+    )
 
     return {
-        "current_question": "Explain how you designed the backend architecture of PrepAI."
+        "interview_response": result["response"],
+        "sources": result["sources"],
     }
-
 
 graph_builder = StateGraph(InterviewState)
 
