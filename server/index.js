@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import express from "express";
 import cors from "cors";
+import { clerkMiddleware } from "@clerk/express";
 
 import { connectDB } from "./config/db.js";
 
@@ -16,7 +17,10 @@ const PORT = process.env.PORT || 8000;
 
 
 const app = express();
-app.use("/api/auth", authRoutes);
+// Initialize Clerk authentication
+app.use(clerkMiddleware());
+
+// app.use("/api/auth", authRoutes);
 // Middleware
 app.use(cors({
     // In production, this set FRONTEND_URL in Vercel.
