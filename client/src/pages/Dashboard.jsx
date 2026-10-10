@@ -56,33 +56,56 @@ const Dashboard = () => {
   // useNavigate hook gives me a function to change route
   const navigate = useNavigate();
   // Get auth state and set up state for progress data
-  const { userName, token } = useAuth(); // Get user's name and token
+  const { userName, getToken, isLoaded, isLoggedIn } = useAuth(); // Get user's name and token
   const [progress, setProgress] = useState(null); // Will hold fetched data
   const [isLoading, setIsLoading] = useState(true);
   // base feature definitions removed — descriptions are generated dynamically below via useMemo
 
   // useEffect to fetch user progress data when component mounts
-  useEffect(() => {
-    const fetchProgress = async () => {
+  // useEffect to fetch user progress data when component mounts
+// useEffect to fetch user progress data when component mounts
+useEffect(() => {
+  const fetchProgress = async () => {
+    // Wait until Clerk has finished loading
+    if (!isLoaded) return;
+
+    // No authenticated user means there is no protected progress to fetch
+    if (!isLoggedIn) {
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      // Get the current Clerk session token
+      const token = await getToken();
+
       if (!token) {
         setIsLoading(false);
-        return; // No token, no data to fetch
+        return;
       }
-      try {
-        // Call the endpoint we built to get all user data
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/user/progress`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        setProgress(response.data); // Save the data {dsaSubmissions, resumeReviews, ...}
-      } catch (err) {
-        console.error("Failed to fetch progress", err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchProgress();
-  }, [token]); // This effect runs once the token is available
 
+      // Call the endpoint we built to get all user data
+      const response = await axios.get(
+        `${import.meta.env.VITE_API_URL}/api/user/progress`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      setProgress(response.data); // Save the data {dsaSubmissions, resumeReviews, ...}
+
+    } catch (err) {
+      console.error("Failed to fetch progress", err);
+
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  fetchProgress();
+}, [getToken, isLoaded, isLoggedIn]);
   // Use of useMemo to dynamically create the feature descriptions
   // This array will be built with default text, and then automatically
   // update once the 'progress' data arrives from our fetch.

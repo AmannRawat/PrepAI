@@ -4,26 +4,47 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
 const StreakCounter = () => {
-  const { token, isLoggedIn } = useAuth();
+  const {
+    getToken,
+    isLoggedIn,
+    isLoaded
+  } = useAuth();
   const [streak, setStreak] = useState(0);
   const [showTooltip, setShowTooltip] = useState(false);
 
   // Fetch streak
+  // Fetch streak
+  // Fetch streak
   useEffect(() => {
     const fetchStreak = async () => {
-      if (!token) return;
+      // Wait until Clerk has finished loading
+      if (!isLoaded || !isLoggedIn) return;
+
       try {
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/user/progress`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        // Get the current Clerk session token
+        const token = await getToken();
+
+        if (!token) return;
+
+        const response = await axios.get(
+          `${import.meta.env.VITE_API_URL}/api/user/progress`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+
         setStreak(response.data.currentStreak || 0);
+
       } catch (error) {
         console.error("Error fetching streak:", error);
       }
     };
-    fetchStreak();
-  }, [token]);
 
+    fetchStreak();
+  }, [getToken, isLoaded, isLoggedIn]);
+  
   // If not logged in, return null (don't render anything)
   if (!isLoggedIn) return null;
   return (

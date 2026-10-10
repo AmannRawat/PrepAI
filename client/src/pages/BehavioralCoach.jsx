@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const BehavioralCoach = () => {
-  const { token, isLoggedIn } = useAuth();
+  const { getToken, isLoggedIn } = useAuth();
   const { openLogin } = useModal();
   const navigate = useNavigate();
   const initialMessage = { sender: 'ai', text: "Hello! I'm your AI Behavioral Coach. To start, tell me about a time you had to work on a team." };
@@ -144,6 +144,12 @@ const BehavioralCoach = () => {
     formData.append('resume', file);
 
     try {
+      const token = await getToken();
+
+      if (!token) {
+        alert("Your session is not ready. Please try again.");
+        return;
+      }
       // We reuse the review endpoint. 
       // It saves the text to DB, which is what we need for the context.
       await axios.post(`${import.meta.env.VITE_API_URL}/api/review-resume`, formData, {
@@ -191,79 +197,118 @@ const BehavioralCoach = () => {
   };
 
   //  Create a shared function for sending messages
-  const sendMessage = async (messageText) => {
-    const userMessage = { sender: 'user', text: messageText };
-    const newMessageHistory = [...messages, userMessage];
+  // Create a shared function for sending messages
+const sendMessage = async (messageText) => {
+  const userMessage = { sender: 'user', text: messageText };
+  const newMessageHistory = [...messages, userMessage];
 
-    // We only display the action message in the log if it's a real user message
-    if (messageText !== "USER_ACTION: End interview") {
-      setMessages(newMessageHistory);
-      setInput('');
+  // We only display the action message in the log if it's a real user message
+  if (messageText !== "USER_ACTION: End interview") {
+    setMessages(newMessageHistory);
+    setInput('');
+  }
+
+  setIsLoading(true);
+
+  try {
+    // Get the current Clerk session token when the user is logged in
+    let token = null;
+    let config = {};
+
+    if (isLoggedIn) {
+      token = await getToken();
+
+      if (!token) {
+        throw new Error("Authentication token is not available.");
+      }
+
+      config = {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      };
     }
 
-    setIsLoading(true);
-
-    try {
-      const config = isLoggedIn && token
-        ? { headers: { 'Authorization': `Bearer ${token}` } }
-        : {};
-      // Call the real backend API with the new chat history
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/behavioral-chat`, {
+    // Call the real backend API with the new chat history
+    const response = await axios.post(
+      `${import.meta.env.VITE_API_URL}/api/behavioral-chat`,
+      {
         messages: newMessageHistory,
-        //  Sending Setup Data to Backend
+
+        // Sending Setup Data to Backend
         targetRole: targetRole,
         targetCompany: targetCompany,
         useResumeContext: useResume
-      }, 
-        //  Add Authorization header
-        // headers: {
-        //   'Authorization': `Bearer ${token}`
-        // }
-        config
-      );
+      },
+      config
+    );
 
-      let aiText = response.data.reply;
-      if (aiText.includes("[SESSION_END]")) {
-        aiText = aiText.replace("[SESSION_END]", "").trim(); // Clean the token from the text
-        setIsSessionOver(true); // Set the session to over
-      }
-      speak(aiText);
-      const aiResponse = { sender: 'ai', text: aiText };
+    let aiText = response.data.reply;
 
-      //  Add the AI's response to the history
-      // speak(errorResponse.text);
-      setMessages(prev => [...prev, aiResponse]);
-
-      // Record this activity for the daily streak
-      // We only do this ONCE per session, on the first successful message
-      if (!activityRecorded && messageText !== "USER_ACTION: End interview") {
-        axios.post(`${import.meta.env.VITE_API_URL}/api/user/record-activity`, {}, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }).then(() => {
-          setActivityRecorded(true); // Mark as recorded for this session
-        }).catch(err => {
-          console.error("Failed to record activity:", err);
-        });
-      }
-    } catch (err) {
-      //  Add better error handling for auth 
-      console.error("Error fetching AI response:", err);
-      let errorResponse;
-      if (err.response && err.response.status === 401) {
-        errorResponse = { sender: 'ai', text: "Sorry, your session has expired. Please log in again." };
-        //  logout() can also be called here
-      } else {
-        errorResponse = { sender: 'ai', text: "Sorry, I'm having trouble connecting. Please try again." };
-      }
-      speak(errorResponse.text);
-      setMessages(prev => [...prev, errorResponse]);
-    } finally {
-      // Stop the loading indicator
-      setIsLoading(false);
+    if (aiText.includes("[SESSION_END]")) {
+      aiText = aiText.replace("[SESSION_END]", "").trim(); // Clean the token from the text
+      setIsSessionOver(true); // Set the session to over
     }
-  };
 
- return (
+    speak(aiText);
+
+    const aiResponse = { sender: 'ai', text: aiText };
+
+    // Add the AI's response to the history
+    setMessages(prev => [...prev, aiResponse]);
+
+    // Record this activity for the daily streak
+    // We only do this ONCE per session, on the first successful message
+    if (
+      isLoggedIn &&
+      token &&
+      !activityRecorded &&
+      messageText !== "USER_ACTION: End interview"
+    ) {
+      axios.post(
+        `${import.meta.env.VITE_API_URL}/api/user/record-activity`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      ).then(() => {
+        setActivityRecorded(true); // Mark as recorded for this session
+      }).catch(err => {
+        console.error("Failed to record activity:", err);
+      });
+    }
+
+  } catch (err) {
+    // Add better error handling for auth
+    console.error("Error fetching AI response:", err);
+
+    let errorResponse;
+
+    if (err.response && err.response.status === 401) {
+      errorResponse = {
+        sender: 'ai',
+        text: "Sorry, your session has expired. Please log in again."
+      };
+      // logout() can also be called here
+    } else {
+      errorResponse = {
+        sender: 'ai',
+        text: "Sorry, I'm having trouble connecting. Please try again."
+      };
+    }
+
+    speak(errorResponse.text);
+    setMessages(prev => [...prev, errorResponse]);
+
+  } finally {
+    // Stop the loading indicator
+    setIsLoading(false);
+  }
+};
+
+  return (
     <div className="flex flex-col flex-1 h-[85vh] md:h-full p-4 pt-4 bg-surface/70 rounded-lg border border-text-secondary/20 relative">
 
       {/* SETUP MODAL OVERLAY */}
@@ -298,63 +343,63 @@ const BehavioralCoach = () => {
               {/* <--- NEW: Conditional Resume Section */}
               <div className="bg-background/50 p-3 rounded border border-text-secondary/20">
                 {isLoggedIn ? (
-                    // OPTION A: LOGGED IN USER (See Upload)
-                    <>
-                        <div className="flex items-center justify-between mb-2">
-                           <label className="flex items-center cursor-pointer">
-                              <input 
-                                type="checkbox" 
-                                checked={useResume} 
-                                onChange={(e) => setUseResume(e.target.checked)}
-                                className="form-checkbox h-5 w-5 text-accent rounded bg-surface border-text-secondary/50"
-                              />
-                              <span className="ml-2 text-text-primary font-medium">Use Resume Context</span>
-                           </label>
-                        </div>
-                        
-                        <p className="text-xs text-text-secondary mb-3">
-                          Uses your uploaded resume to personalize questions.
-                        </p>
-
-                        <input 
-                            type="file" 
-                            ref={fileInputRef} 
-                            className="hidden" 
-                            accept=".pdf" 
-                            onChange={handleFileUpload}
+                  // OPTION A: LOGGED IN USER (See Upload)
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useResume}
+                          onChange={(e) => setUseResume(e.target.checked)}
+                          className="form-checkbox h-5 w-5 text-accent rounded bg-surface border-text-secondary/50"
                         />
-
-                        <button 
-                          onClick={() => fileInputRef.current.click()}
-                          disabled={isUploading}
-                          className="w-full py-2 border border-dashed border-accent/50 rounded flex items-center justify-center gap-2 text-xs text-accent hover:bg-accent/10 transition-colors"
-                        >
-                          {isUploading ? (
-                              <> <Loader2 size={14} className="animate-spin" /> Uploading...</>
-                          ) : uploadSuccess ? (
-                              <> <CheckCircle size={14} /> Resume Updated!</>
-                          ) : (
-                              <> <Upload size={14} /> Upload New Resume (PDF)</>
-                          )}
-                        </button>
-                    </>
-                ) : (
-                    // OPTION B: GUEST USER (See Login CTA)
-                    <div className="text-center py-2">
-                        <div className="flex items-center justify-center gap-2 text-text-secondary mb-2 opacity-50">
-                            <input type="checkbox" disabled checked={false} />
-                            <span className="font-medium">Use Resume Context</span>
-                        </div>
-                        <p className="text-xs text-text-secondary mb-3">
-                            Log in to upload your resume and get personalized questions based on your experience.
-                        </p>
-                        <button 
-                            onClick={openLogin}
-                            className="w-full py-2 bg-accent/10 border border-accent/30 text-accent rounded flex items-center justify-center gap-2 text-sm font-bold hover:bg-accent hover:text-white transition-colors"
-                        >
-                            <LogIn size={16} /> Log In to Personalize
-                        </button>
+                        <span className="ml-2 text-text-primary font-medium">Use Resume Context</span>
+                      </label>
                     </div>
+
+                    <p className="text-xs text-text-secondary mb-3">
+                      Uses your uploaded resume to personalize questions.
+                    </p>
+
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      className="hidden"
+                      accept=".pdf"
+                      onChange={handleFileUpload}
+                    />
+
+                    <button
+                      onClick={() => fileInputRef.current.click()}
+                      disabled={isUploading}
+                      className="w-full py-2 border border-dashed border-accent/50 rounded flex items-center justify-center gap-2 text-xs text-accent hover:bg-accent/10 transition-colors"
+                    >
+                      {isUploading ? (
+                        <> <Loader2 size={14} className="animate-spin" /> Uploading...</>
+                      ) : uploadSuccess ? (
+                        <> <CheckCircle size={14} /> Resume Updated!</>
+                      ) : (
+                        <> <Upload size={14} /> Upload New Resume (PDF)</>
+                      )}
+                    </button>
+                  </>
+                ) : (
+                  // OPTION B: GUEST USER (See Login CTA)
+                  <div className="text-center py-2">
+                    <div className="flex items-center justify-center gap-2 text-text-secondary mb-2 opacity-50">
+                      <input type="checkbox" disabled checked={false} />
+                      <span className="font-medium">Use Resume Context</span>
+                    </div>
+                    <p className="text-xs text-text-secondary mb-3">
+                      Log in to upload your resume and get personalized questions based on your experience.
+                    </p>
+                    <button
+                      onClick={openLogin}
+                      className="w-full py-2 bg-accent/10 border border-accent/30 text-accent rounded flex items-center justify-center gap-2 text-sm font-bold hover:bg-accent hover:text-white transition-colors"
+                    >
+                      <LogIn size={16} /> Log In to Personalize
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -376,10 +421,10 @@ const BehavioralCoach = () => {
       <header className="mb-4">
         {/* <--- NEW: GUEST BANNER */}
         {!isLoggedIn && (
-            <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 p-2 rounded-md mb-3 text-sm text-center flex items-center justify-center gap-2">
-                <AlertCircle size={16} />
-                <span>Guest Mode: Chat history will not be saved. <button onClick={openLogin} className="underline font-bold hover:text-blue-300">Log In</button></span>
-            </div>
+          <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 p-2 rounded-md mb-3 text-sm text-center flex items-center justify-center gap-2">
+            <AlertCircle size={16} />
+            <span>Guest Mode: Chat history will not be saved. <button onClick={openLogin} className="underline font-bold hover:text-blue-300">Log In</button></span>
+          </div>
         )}
 
         <div className="flex justify-between items-start">

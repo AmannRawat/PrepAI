@@ -10,7 +10,7 @@ const ResumeReviewer = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [feedback, setFeedback] = useState(null);
-  const { token, isLoggedIn } = useAuth(); // <--- Get isLoggedIn
+  const { getToken, isLoggedIn } = useAuth(); // <--- Get isLoggedIn
   const { openLogin } = useModal();
 
   // This function runs when the user selects a file
@@ -29,45 +29,69 @@ const ResumeReviewer = () => {
   };
 
   // This function will run when we click the "Analyze" button
-  const handleUpload = async () => {
-    if (!selectedFile) {
-      alert("Please select a file first.");
-      return;
-    }
+const handleUpload = async () => {
+  if (!selectedFile) {
+    alert("Please select a file first.");
+    return;
+  }
 
-    setIsLoading(true);
-    setError(null);
-    setFeedback(null);
+  setIsLoading(true);
+  setError(null);
+  setFeedback(null);
 
-    // Use FormData to send the file
-    const formData = new FormData();
-    formData.append('resume', selectedFile); // 'resume' must match the key expected by multer
+  // Use FormData to send the file
+  const formData = new FormData();
+  formData.append('resume', selectedFile); // 'resume' must match the key expected by multer
 
-    try {
-      const config = {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          // Only add Authorization if logged in
-          ...(isLoggedIn && token ? { 'Authorization': `Bearer ${token}` } : {})
-        }
-      };
+  try {
+    // Get the current Clerk session token
+    const token = isLoggedIn ? await getToken() : null;
 
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/review-resume`, formData, config);
-      setFeedback(response.data); // Store the AI's feedback object
-      //  Record this activity for the daily streak 
-      if (isLoggedIn) {
-        axios.post(`${import.meta.env.VITE_API_URL}/api/user/record-activity`, {}, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }).catch(err => console.error("Failed to record activity:", err));
+    const config = {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        ...(token
+          ? {
+              Authorization: `Bearer ${token}`
+            }
+          : {})
       }
+    };
 
-    } catch (err) {
-      const errorMessage = err.response ? err.response.data.error : 'An unexpected error occurred.';
-      setError(errorMessage);
-    } finally {
-      setIsLoading(false);
+    const response = await axios.post(
+      `${import.meta.env.VITE_API_URL}/api/review-resume`,
+      formData,
+      config
+    );
+
+    setFeedback(response.data); // Store the AI's feedback object
+
+    // Record this activity for the daily streak
+    if (isLoggedIn && token) {
+      axios.post(
+        `${import.meta.env.VITE_API_URL}/api/user/record-activity`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      ).catch(err => {
+        console.error("Failed to record activity:", err);
+      });
     }
-  };
+
+  } catch (err) {
+    const errorMessage = err.response
+      ? err.response.data.error
+      : 'An unexpected error occurred.';
+
+    setError(errorMessage);
+
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   return (
     <div className="flex flex-col flex-1 h-full">
