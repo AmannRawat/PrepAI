@@ -15,9 +15,17 @@ const userSchema = new mongoose.Schema({
         lowercase: true, // Store email in lowercase
         trim: true // Remove any extra whitespace
     },
+    clerkUserId: {
+        type: String,
+        unique: true,
+        sparse: true
+        // Links the MongoDB user to their Clerk identity.
+        // Existing users can keep this field unset until they sign in through Clerk.
+    },
     password: {
         type: String,
-        required: [true, "Password is required"],
+        // Password is optional because Clerk manages authentication.
+        // Existing users with passwords can continue using their stored password hashes.
         minlength: [6, "Password must be at least 6 characters long"]
     },
     currentStreak: {
@@ -36,28 +44,31 @@ const userSchema = new mongoose.Schema({
     timestamps: true
 });
 
-//  Password Hashing Middleware
-// This function runs automatically *before* a new user is saved
+// Password Hashing Middleware
+// This function runs automatically before a user is saved.
 userSchema.pre('save', async function (next) {
-    // 'this' refers to the user document about to be saved
+    // 'this' refers to the user document about to be saved.
 
-    // We only hash the password if it's new or has been modified
-    if (!this.isModified('password')) {
+    // Clerk-managed users don't need a local password.
+    // Existing passwords are hashed only when newly added or modified.
+    if (!this.password || !this.isModified('password')) {
         return next();
     }
 
     try {
-        // Generate a "salt" (a random string to make the hash secure)
+        // Generate a salt (a random string to make the hash secure).
         const salt = await bcrypt.genSalt(10);
-        // Hash the password with the salt and update the user's password field
+
+        // Hash the password with the salt and update the user's password field.
         this.password = await bcrypt.hash(this.password, salt);
+
         next();
     } catch (error) {
         next(error);
     }
 });
 
-// This creates the 'User' model (which will use the 'users' collection in MongoDB)
+// This creates the 'User' model (which will use the 'users' collection in MongoDB).
 const User = mongoose.model('User', userSchema);
 
 export default User;

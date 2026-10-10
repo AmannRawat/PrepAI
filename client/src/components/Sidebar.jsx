@@ -3,25 +3,48 @@ import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Home, Code, MessageSquare, FileText, User, LogOut, Flame } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+
 const Sidebar = () => {
   const [streak, setStreak] = useState(0);
-  const { logout, userEmail,userName ,token} = useAuth();
 
-// Fetch streak when sidebar loads
+  const {
+    logout,
+    userName,
+    getToken,
+    isLoaded,
+    isLoggedIn,
+  } = useAuth();
+
+  // Fetch streak when sidebar loads
   useEffect(() => {
     const fetchStreak = async () => {
-      if (!token) return;
+      // Wait until Clerk has finished loading the authentication state
+      if (!isLoaded || !isLoggedIn) return;
+
       try {
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/user/progress`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        // Clerk provides the current session token dynamically.
+        // We no longer use the old JWT token from AuthContext.
+        const token = await getToken();
+
+        if (!token) return;
+
+        const response = await axios.get(
+          `${import.meta.env.VITE_API_URL}/api/user/progress`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+
         setStreak(response.data.currentStreak || 0);
       } catch (error) {
         console.error("Error fetching streak:", error);
       }
     };
+
     fetchStreak();
-  }, [token]);
+  }, [getToken, isLoaded, isLoggedIn]);
 
   // A helper function for NavLink's className to apply styles for active links
   const getNavLinkClass = ({ isActive }) => {
@@ -35,7 +58,7 @@ const Sidebar = () => {
       <div className="flex items-center gap-2 mb-12">
         <span className="text-2xl font-bold text-accent font-mono">PrepAI</span>
       </div>
-      
+
       {/* Streak Counter Section
       <div className="mb-6 bg-gradient-to-r from-orange-500/10 to-red-500/10 border border-orange-500/20 p-3 rounded-xl flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -54,14 +77,17 @@ const Sidebar = () => {
           <Home className="mr-4" />
           <span>Dashboard</span>
         </NavLink>
+
         <NavLink to="/dsa-arena" className={getNavLinkClass}>
           <Code className="mr-4" />
           <span>DSA Arena</span>
         </NavLink>
+
         <NavLink to="/behavioral-coach" className={getNavLinkClass}>
           <MessageSquare className="mr-4" />
           <span>Behavioral Coach</span>
         </NavLink>
+
         <NavLink to="/resume-reviewer" className={getNavLinkClass}>
           <FileText className="mr-4" />
           <span>Resume Reviewer</span>
@@ -69,23 +95,29 @@ const Sidebar = () => {
       </nav>
 
       {/* Placeholder for user profile at the bottom */}
-     <div className="mt-auto">
+      <div className="mt-auto">
+
         {/* Changed this to a NavLink pointing to /profile */}
         <NavLink to="/profile" className={getNavLinkClass}>
-            <div className="w-10 h-10 bg-text-secondary/50 rounded-full mr-4 flex items-center justify-center">
-              <User size={20} className="text-text-primary" />
-            </div>
-            <span className="truncate">{userName || 'User Profile'}</span>
-            {/* <span className="truncate">User Profile</span> */}
+          <div className="w-10 h-10 bg-text-secondary/50 rounded-full mr-4 flex items-center justify-center">
+            <User size={20} className="text-text-primary" />
+          </div>
+
+          <span className="truncate">
+            {userName || 'User Profile'}
+          </span>
+
+          {/* <span className="truncate">User Profile</span> */}
         </NavLink>
 
         {/* Logout Button */}
-        <button 
-          onClick={logout} 
+        <button
+          onClick={logout}
+          type="button"
           className="flex items-center p-3 rounded-lg hover:bg-surface transition-colors duration-200 w-full mt-2"
         >
-            <LogOut className="mr-4" />
-            <span>Logout</span>
+          <LogOut className="mr-4" />
+          <span>Logout</span>
         </button>
       </div>
     </aside>

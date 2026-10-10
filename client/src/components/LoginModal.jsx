@@ -1,10 +1,20 @@
 import { SignIn } from "@clerk/react";
 import { useModal } from "../context/ModalContext";
 import { X } from "lucide-react";
+import { useEffect } from "react";
+import { useAuth } from "../context/AuthContext";
 
 const LoginModal = () => {
     const { isLoginOpen, closeLogin } = useModal();
+    const { isLoaded, isLoggedIn } = useAuth();
 
+    useEffect(() => {
+        if (isLoaded && isLoggedIn) {
+            closeLogin();
+        }
+    }, [isLoaded, isLoggedIn, closeLogin]);
+
+    // If the modal is not open, don't render anything.
     if (!isLoginOpen) {
         return null;
     }

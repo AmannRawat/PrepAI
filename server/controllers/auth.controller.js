@@ -1,3 +1,7 @@
+// LEGACY AUTHENTICATION
+// Kept for reference from the original PrepAI implementation.
+// PrepAI 2.0 uses Clerk authentication instead.
+
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import User from "../models/User.model.js";
