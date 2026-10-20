@@ -62,3 +62,21 @@ html {
 * {
   transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out, border-color 0.2s ease-in-out;
 }
+
+
+/* PrepAI DSA Coach: animate the robot's mouth while text is typing */
+@keyframes dsaRobotMouth {
+  from {
+    transform: scaleY(0.5);
+  }
+
+  to {
+    transform: scaleY(1.8);
+  }
+}
+
+.dsa-robot-mouth {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dsaRobotMouth 180ms ease-in-out infinite alternate;
+}

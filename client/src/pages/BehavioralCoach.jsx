@@ -2896,6 +2896,4 @@ const BehavioralCoach = () => {
 
 };
 
-
-
 export default BehavioralCoach;

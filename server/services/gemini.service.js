@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const flashModel = genAI.getGenerativeModel({
-  model: "gemini-3.5-flash",
+  model: "gemini-3.5-flash-lite",
 });
 
 export async function generateText(prompt) {

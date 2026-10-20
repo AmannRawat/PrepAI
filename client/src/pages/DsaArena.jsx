@@ -1,9 +1,7 @@
-import { useState, useCallback, useEffect } from 'react';
 
-// Importing Axios to make API calls
+import { useState, useCallback, useEffect } from 'react';
 import axios from 'axios';
 
-// Importing CodeMirror and its extensions ---
 import CodeMirror from '@uiw/react-codemirror';
 import { okaidia } from '@uiw/codemirror-theme-okaidia';
 import { javascript } from '@codemirror/lang-javascript';
@@ -11,72 +9,93 @@ import { cpp } from '@codemirror/lang-cpp';
 import { java } from '@codemirror/lang-java';
 import { python } from '@codemirror/lang-python';
 
-//Importing Prettier for code formatting
-import prettier from "prettier/standalone";
+import prettier from 'prettier/standalone';
 import babel from 'prettier/plugins/babel';
 import estree from 'prettier/plugins/estree';
-// import * as javaPlugin from "prettier-plugin-java";
 
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
 import { CheckCircle, AlertCircle, AlertTriangle } from 'lucide-react';
+import DsaCoach from '../components/DsaCoach';
+
+const DEFAULT_BOILERPLATES = {
+  javascript: 'function solve() {\n  // Your code here\n}',
+  python: 'def solve():\n    pass',
+  java: 'class Solution {\n    public void solve() {\n        // Your code here\n    }\n}',
+  cpp: 'class Solution {\npublic:\n    void solve() {\n        // Your code here\n    }\n};',
+};
+
+const SUPPORTED_LANGUAGES = ['javascript', 'python', 'java', 'cpp'];
+
+function getBoilerplate(problem, language) {
+  return (
+    problem?.boilerplates?.[language] ||
+    DEFAULT_BOILERPLATES[language] ||
+    DEFAULT_BOILERPLATES.javascript
+  );
+}
+
+// Identifies the old generic starter templates that may have been
+// saved under the wrong language by an earlier version of DSA Arena.
+function isGenericStarterCode(code) {
+  if (typeof code !== 'string') return true;
+
+  return (
+    code.includes("console.log('Hello, PrepAI!')") ||
+    code.trim() === 'function solve() {\n // Your code here\n console.log(\'Hello, PrepAI!\');\n}' ||
+    code.trim() === 'function solve() {\n  // Your code here\n}'
+  );
+}
 
 const DsaArena = () => {
   const { getToken, isLoggedIn, userId } = useAuth();
   const { openLogin } = useModal();
 
-  // Set up state to hold the code ---
-  const [code, setCode] = useState(
-    "function solve() {\n // Your code here\n console.log('Hello, PrepAI!');\n}"
-  );
-
-  // Adding state for the selected language and its CodeMirror extension ---
+  const [code, setCode] = useState(DEFAULT_BOILERPLATES.javascript);
   const [language, setLanguage] = useState('javascript');
   const [langExtension, setLangExtension] = useState(javascript({ jsx: true }));
 
-  // State for problem generation
   const [problem, setProblem] = useState(null);
   const [topic, setTopic] = useState('Arrays');
   const [difficulty, setDifficulty] = useState('Easy');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Add state for code evaluation
   const [feedback, setFeedback] = useState(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationError, setEvaluationError] = useState(null);
 
-  // Unique localStorage key for this user's DSA Arena state.
-  // Including the Clerk user ID prevents one user's unfinished work
-  // from appearing when another user logs into the same browser.
   const dsaStorageKey = userId ? `prepai:${userId}:dsa` : null;
 
-  // ------------------------------------------------------------
-  // DSA PERSISTENCE
-  // ------------------------------------------------------------
-
-  // Restore saved DSA state when the component loads.
+  // Restore saved DSA state.
   useEffect(() => {
     if (!dsaStorageKey) return;
 
     try {
       const savedState = localStorage.getItem(dsaStorageKey);
-
       if (!savedState) return;
 
       const parsedState = JSON.parse(savedState);
+      const savedLanguage = SUPPORTED_LANGUAGES.includes(parsedState.language)
+        ? parsedState.language
+        : 'javascript';
 
-      if (parsedState.code !== undefined) {
-        setCode(parsedState.code);
-      }
+      const savedProblem = parsedState.problem ?? null;
+      const savedCode = parsedState.code;
+      const hasSavedCode = typeof savedCode === 'string';
 
-      if (parsedState.language !== undefined) {
-        setLanguage(parsedState.language);
-      }
+      const shouldReplaceStarter =
+        !hasSavedCode ||
+        (savedLanguage !== 'javascript' &&
+          isGenericStarterCode(savedCode));
 
-      if (parsedState.problem !== undefined) {
-        setProblem(parsedState.problem);
-      }
+      setLanguage(savedLanguage);
+      setProblem(savedProblem);
+      setCode(
+        shouldReplaceStarter
+          ? getBoilerplate(savedProblem, savedLanguage)
+          : savedCode
+      );
 
       if (parsedState.topic !== undefined) {
         setTopic(parsedState.topic);
@@ -94,9 +113,9 @@ const DsaArena = () => {
         setEvaluationError(parsedState.evaluationError);
       }
 
-      console.log("DSA state restored from localStorage.");
+      console.log('DSA state restored from localStorage.');
     } catch (error) {
-      console.error("Failed to restore DSA Arena state:", error);
+      console.error('Failed to restore DSA Arena state:', error);
     }
   }, [dsaStorageKey]);
 
@@ -124,14 +143,9 @@ const DsaArena = () => {
               : evaluationError,
         };
 
-        localStorage.setItem(
-          dsaStorageKey,
-          JSON.stringify(stateToSave)
-        );
-
-        console.log("DSA state saved to localStorage.");
+        localStorage.setItem(dsaStorageKey, JSON.stringify(stateToSave));
       } catch (error) {
-        console.error("Failed to save DSA Arena state:", error);
+        console.error('Failed to save DSA Arena state:', error);
       }
     },
     [
@@ -142,42 +156,34 @@ const DsaArena = () => {
       topic,
       difficulty,
       feedback,
-      evaluationError
+      evaluationError,
     ]
   );
 
-  // ------------------------------------------------------------
-  // CODEMIRROR LANGUAGE
-  // ------------------------------------------------------------
-
+  // Update CodeMirror syntax highlighting.
   useEffect(() => {
     switch (language) {
       case 'javascript':
         setLangExtension(javascript({ jsx: true }));
         break;
-
       case 'cpp':
         setLangExtension(cpp());
         break;
-
       case 'java':
         setLangExtension(java());
         break;
-
       case 'python':
         setLangExtension(python());
         break;
-
       default:
         setLangExtension(javascript({ jsx: true }));
     }
   }, [language]);
 
-  // Set the boilerplate when a problem is generated.
-  // If the user already has saved code for this exact problem and language,
-  // keep the saved code instead of overwriting it.
+  // Load the correct boilerplate for a newly generated problem.
+  // Preserve saved work when the same problem and language are restored.
   useEffect(() => {
-    if (!problem || !problem.boilerplates) return;
+    if (!problem) return;
 
     if (dsaStorageKey) {
       try {
@@ -189,128 +195,130 @@ const DsaArena = () => {
           const isSameProblem =
             parsedState.problem?.title === problem.title;
 
-          const isSameLanguage =
-            parsedState.language === language;
+          const isSameLanguage = parsedState.language === language;
+          const hasSavedCode = typeof parsedState.code === 'string';
 
-          const hasSavedCode =
-            parsedState.code !== undefined;
-
-          if (isSameProblem && isSameLanguage && hasSavedCode) {
+          if (
+            isSameProblem &&
+            isSameLanguage &&
+            hasSavedCode &&
+            !(
+              language !== 'javascript' &&
+              isGenericStarterCode(parsedState.code)
+            )
+          ) {
             return;
           }
         }
       } catch (error) {
-        console.error("Failed to check saved DSA state:", error);
+        console.error('Failed to check saved DSA state:', error);
       }
     }
 
-    const boilerplate =
-      problem.boilerplates[language] ||
-      `// Boilerplate for ${language} not available.`;
+    const boilerplate = getBoilerplate(problem, language);
 
     setCode(boilerplate);
 
-    // Save the generated problem and its initial boilerplate.
     saveDsaState({
       problem,
       code: boilerplate,
-      language
+      language,
     });
   }, [problem, language, dsaStorageKey, saveDsaState]);
 
-  // ------------------------------------------------------------
-  // GENERATE PROBLEM
-  // ------------------------------------------------------------
-
+  // Generate a new problem.
   const generateProblem = async () => {
     setError(null);
     setIsLoading(true);
     setProblem(null);
     setFeedback(null);
+    setEvaluationError(null);
 
-    // Clear the old problem from storage because the user
-    // explicitly requested a new problem.
     if (dsaStorageKey) {
       try {
         localStorage.removeItem(dsaStorageKey);
       } catch (error) {
-        console.error("Failed to clear old DSA state:", error);
+        console.error('Failed to clear old DSA state:', error);
       }
     }
 
     try {
-      // Get the current Clerk session token if the user is logged in
       const token = isLoggedIn ? await getToken() : null;
 
       const config = token
         ? {
             headers: {
-              Authorization: `Bearer ${token}`
-            }
+              Authorization: `Bearer ${token}`,
+            },
           }
         : {};
 
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/api/generate-problem`,
-        {
-          topic,
-          difficulty
-        },
+        { topic, difficulty },
         config
       );
 
       setProblem(response.data);
 
-      // Save the selected options immediately.
+      // The problem effect loads the boilerplate for the selected language.
       saveDsaState({
         problem: response.data,
         topic,
         difficulty,
         feedback: null,
-        evaluationError: null
+        evaluationError: null,
       });
-
     } catch (err) {
-      const errorMessage = err.response
+      const errorMessage = err.response?.data?.error
         ? err.response.data.error
         : 'An unexpected error occurred.';
 
       setError(errorMessage);
-
     } finally {
       setIsLoading(false);
     }
   };
 
-  // ------------------------------------------------------------
-  // CODE EDITOR
-  // ------------------------------------------------------------
-
-  // Update code state whenever the user types in the editor.
+  // Update and persist editor contents.
   const onChange = useCallback(
     (value) => {
       setCode(value);
-
-      // Save the code immediately.
-      saveDsaState({
-        code: value
-      });
+      saveDsaState({ code: value });
     },
     [saveDsaState]
   );
 
-  // ------------------------------------------------------------
-  // CODE SUBMISSION
-  // ------------------------------------------------------------
+  // Change language and load the corresponding starter code.
+  const handleLanguageChange = (event) => {
+    const newLanguage = event.target.value;
 
+    if (!SUPPORTED_LANGUAGES.includes(newLanguage)) return;
+
+    const newCode = getBoilerplate(problem, newLanguage);
+
+    setLanguage(newLanguage);
+    setCode(newCode);
+    setFeedback(null);
+    setEvaluationError(null);
+
+    saveDsaState({
+      language: newLanguage,
+      code: newCode,
+      feedback: null,
+      evaluationError: null,
+    });
+  };
+
+  // Submit code for AI evaluation.
   const handleCodeSubmission = async () => {
     if (!isLoggedIn) {
-      openLogin(); // Trigger the popup!
-      return; // Stop execution
+      openLogin();
+      return;
     }
 
     if (!problem) {
-      setEvaluationError("Please generate a problem first.");
+      setEvaluationError('Please generate a problem first.');
       return;
     }
 
@@ -319,11 +327,10 @@ const DsaArena = () => {
     setFeedback(null);
 
     try {
-      // Get the current Clerk session token
       const token = await getToken();
 
       if (!token) {
-        setEvaluationError("Your session is not ready. Please try again.");
+        setEvaluationError('Your session is not ready. Please try again.');
         return;
       }
 
@@ -337,115 +344,86 @@ const DsaArena = () => {
         },
         {
           headers: {
-            Authorization: `Bearer ${token}`
-          }
+            Authorization: `Bearer ${token}`,
+          },
         }
       );
 
       setFeedback(response.data);
+      saveDsaState({ feedback: response.data });
 
-      // Save the evaluation result.
-      saveDsaState({
-        feedback: response.data
-      });
-
-      // Record this activity for the daily streak
-      // We do this after the submission is successful.
-      axios.post(
-        `${import.meta.env.VITE_API_URL}/api/user/record-activity`,
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
+      // Record activity after a successful submission.
+      axios
+        .post(
+          `${import.meta.env.VITE_API_URL}/api/user/record-activity`,
+          {},
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
           }
-        }
-      ).then(() => {
-        // Activity has been successfully recorded.
-      }).catch(err => {
-        // If this fails, it is not critical. Log it, but don't bother the user.
-        console.error("Failed to record activity:", err);
-      });
-
+        )
+        .catch((err) => {
+          console.error('Failed to record activity:', err);
+        });
     } catch (err) {
-      const errorMessage = err.response
+      const errorMessage = err.response?.data?.error
         ? err.response.data.error
         : 'An unexpected error occurred.';
 
       setEvaluationError(errorMessage);
-
-      saveDsaState({
-        evaluationError: errorMessage
-      });
-
+      saveDsaState({ evaluationError: errorMessage });
     } finally {
       setIsEvaluating(false);
     }
   };
 
-  // ------------------------------------------------------------
-  // FORMAT CODE
-  // ------------------------------------------------------------
-
-  // Function to format the code using Prettier
+  // Format JavaScript using Prettier.
   const handleFormatCode = async () => {
     try {
       let parser;
-      let plugins; // <-- FIX: Declare plugins here, outside the switch
+      let plugins;
 
       switch (language) {
         case 'javascript':
           parser = 'babel';
-          plugins = [babel, estree]; // Assign value inside the switch
+          plugins = [babel, estree];
           break;
-
-        // case 'java':
-        //   parser = 'java';
-        //   plugins = [javaPlugin]; // Assign value inside the switch
-        //   break;
-
         default:
           console.log(`Formatting for ${language} is not yet supported.`);
           return;
       }
 
       const formattedCode = await prettier.format(code, {
-        parser: parser,
-        plugins: plugins,
+        parser,
+        plugins,
         singleQuote: true,
         trailingComma: 'es5',
       });
 
       setCode(formattedCode);
-
-      // Save formatted code immediately.
-      saveDsaState({
-        code: formattedCode
-      });
-
+      saveDsaState({ code: formattedCode });
     } catch (error) {
-      console.error("Failed to format code:", error);
+      console.error('Failed to format code:', error);
     }
   };
 
-  // For closing the feedback panel when clicking close
+  // Close the feedback panel.
   const closeFeedbackPanel = () => {
     setFeedback(null);
     setEvaluationError(null);
 
     saveDsaState({
       feedback: null,
-      evaluationError: null
+      evaluationError: null,
     });
   };
 
-  // ------------------------------------------------------------
-  // FEEDBACK
-  // ------------------------------------------------------------
-
+  // Determine feedback status.
   const getFeedbackStatus = () => {
     if (!feedback) return null;
 
-    const text = feedback.correctness.toLowerCase();
+    const text = (feedback.correctness || '').toLowerCase();
 
     if (
       text.includes('incorrect') ||
@@ -458,7 +436,7 @@ const DsaArena = () => {
         color: 'text-red-400',
         bg: 'bg-red-500/10',
         border: 'border-red-500/20',
-        icon: <AlertCircle className="text-red-400" />
+        icon: <AlertCircle className="text-red-400" />,
       };
     }
 
@@ -468,7 +446,7 @@ const DsaArena = () => {
         color: 'text-green-400',
         bg: 'bg-green-500/10',
         border: 'border-green-500/20',
-        icon: <CheckCircle className="text-green-400" />
+        icon: <CheckCircle className="text-green-400" />,
       };
     }
 
@@ -477,43 +455,31 @@ const DsaArena = () => {
       color: 'text-yellow-400',
       bg: 'bg-yellow-500/10',
       border: 'border-yellow-500/20',
-      icon: <AlertTriangle className="text-yellow-400" />
+      icon: <AlertTriangle className="text-yellow-400" />,
     };
   };
 
   const status = getFeedbackStatus();
 
-  // ------------------------------------------------------------
-  // UI
-  // ------------------------------------------------------------
-
   return (
     <div className="flex flex-col flex-1 h-full">
+      <DsaCoach activeProblem={problem} code={code} language={language} />
 
-      {/* Header */}
       <header className="mb-6 flex-shrink-0">
-        <h1 className="text-3xl font-bold text-text-primary">
-          DSA Arena
-        </h1>
-
+        <h1 className="text-3xl font-bold text-text-primary">DSA Arena</h1>
         <p className="text-text-secondary">
           Select a topic, solve the problem, and get instant AI feedback.
         </p>
       </header>
 
-      {/* Main two-panel layout */}
       <div className="flex flex-1 flex-col lg:flex-row gap-6 overflow-hidden">
-
-        {/* Left Panel: Problem Statement (now wider) */}
+        {/* Problem panel */}
         <div className="lg:w-2/5 flex flex-col bg-surface/70 p-4 rounded-lg border border-text-secondary/20 overflow-hidden">
-
           <h2 className="text-xl font-bold text-accent mb-4 border-b border-text-secondary/20 pb-2 flex-shrink-0">
             Problem
           </h2>
 
-          {/* UI for Topic, Difficulty, and the Button */}
           <div className="space-y-4 mb-4 flex-shrink-0">
-
             <div>
               <label
                 htmlFor="topic"
@@ -525,13 +491,10 @@ const DsaArena = () => {
               <select
                 id="topic"
                 value={topic}
-                onChange={(e) => {
-                  const newTopic = e.target.value;
+                onChange={(event) => {
+                  const newTopic = event.target.value;
                   setTopic(newTopic);
-
-                  saveDsaState({
-                    topic: newTopic
-                  });
+                  saveDsaState({ topic: newTopic });
                 }}
                 className="w-full bg-background text-text-primary rounded px-2 py-1 border border-text-secondary/30"
               >
@@ -554,13 +517,10 @@ const DsaArena = () => {
               <select
                 id="difficulty"
                 value={difficulty}
-                onChange={(e) => {
-                  const newDifficulty = e.target.value;
+                onChange={(event) => {
+                  const newDifficulty = event.target.value;
                   setDifficulty(newDifficulty);
-
-                  saveDsaState({
-                    difficulty: newDifficulty
-                  });
+                  saveDsaState({ difficulty: newDifficulty });
                 }}
                 className="w-full bg-background text-text-primary rounded px-2 py-1 border border-text-secondary/30"
               >
@@ -580,16 +540,9 @@ const DsaArena = () => {
           </div>
 
           <div className="flex-1 overflow-y-auto pr-2 text-text-secondary">
+            {isLoading && <p>Generating a new problem...</p>}
 
-            {isLoading && (
-              <p>Generating a new problem...</p>
-            )}
-
-            {error && (
-              <div className="text-red-400">
-                Error: {error}
-              </div>
-            )}
+            {error && <div className="text-red-400">Error: {error}</div>}
 
             {!problem && !isLoading && !error && (
               <p>
@@ -599,7 +552,6 @@ const DsaArena = () => {
 
             {problem && (
               <div>
-
                 <h3 className="text-lg font-bold text-text-primary mb-2">
                   {problem.title}
                 </h3>
@@ -608,64 +560,66 @@ const DsaArena = () => {
                   {problem.description}
                 </p>
 
+                {Array.isArray(problem.constraints) &&
+                  problem.constraints.length > 0 && (
+                    <>
+                      <h4 className="font-semibold text-text-primary mb-2">
+                        Constraints:
+                      </h4>
+                      <ul className="list-disc pl-5 mb-4 space-y-1">
+                        {problem.constraints.map((constraint, index) => (
+                          <li key={index}>{constraint}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+
                 <h4 className="font-semibold text-text-primary mb-2">
                   Examples:
                 </h4>
 
-                {problem.examples.map((ex, index) => (
+                {(problem.examples || []).map((example, index) => (
                   <div
                     key={index}
                     className="bg-background/50 p-2 rounded mb-2 text-sm"
                   >
-
                     <p>
                       <strong>Input:</strong>{' '}
                       <code className="text-accent">
-                        {typeof ex.input === 'string'
-                          ? ex.input
-                          : JSON.stringify(ex.input)}
+                        {typeof example.input === 'string'
+                          ? example.input
+                          : JSON.stringify(example.input)}
                       </code>
                     </p>
 
                     <p>
                       <strong>Output:</strong>{' '}
                       <code className="text-accent">
-                        {typeof ex.output === 'string'
-                          ? ex.output
-                          : JSON.stringify(ex.output)}
+                        {typeof example.output === 'string'
+                          ? example.output
+                          : JSON.stringify(example.output)}
                       </code>
                     </p>
 
-                    {ex.explanation && (
+                    {example.explanation && (
                       <p className="text-xs mt-1">
-                        <em>{ex.explanation}</em>
+                        <em>{example.explanation}</em>
                       </p>
                     )}
-
                   </div>
                 ))}
-
               </div>
             )}
-
           </div>
         </div>
 
-        {/* Right Container for Editor and Feedback (now wider) */}
+        {/* Editor and feedback */}
         <div className="lg:w-3/5 flex flex-col gap-6 overflow-hidden">
-
-          {/* Top part: Code Editor */}
           <div className="flex-1 flex flex-col bg-surface/70 rounded-lg border border-text-secondary/20 overflow-hidden">
-
             <div className="bg-background p-2 border-b border-text-secondary/20 flex justify-between items-center">
-
-              <h2 className="text-xl font-bold text-accent">
-                Your Solution
-              </h2>
+              <h2 className="text-xl font-bold text-accent">Your Solution</h2>
 
               <div className="flex items-center gap-4">
-
-                {/* Format Button */}
                 <button
                   onClick={handleFormatCode}
                   title="Format Code"
@@ -688,18 +642,9 @@ const DsaArena = () => {
                   </svg>
                 </button>
 
-                {/* Adding the language selector dropdown */}
                 <select
                   value={language}
-                  onChange={(e) => {
-                    const newLanguage = e.target.value;
-
-                    setLanguage(newLanguage);
-
-                    saveDsaState({
-                      language: newLanguage
-                    });
-                  }}
+                  onChange={handleLanguageChange}
                   className="bg-surface text-text-primary rounded px-2 py-1 border border-text-secondary/30 focus:outline-none focus:ring-1 focus:ring-accent"
                 >
                   <option value="javascript">JavaScript</option>
@@ -707,14 +652,10 @@ const DsaArena = () => {
                   <option value="java">Java</option>
                   <option value="cpp">C++</option>
                 </select>
-
               </div>
             </div>
 
-            {/* Replace placeholder div with the CodeMirror component*/}
             <div className="flex-1 overflow-y-auto">
-
-              {/* We make this container scrollable */}
               <CodeMirror
                 value={code}
                 height="100%"
@@ -723,12 +664,9 @@ const DsaArena = () => {
                 onChange={onChange}
                 style={{ fontSize: '16px' }}
               />
-
             </div>
 
             <div className="p-2 bg-background border-t border-text-secondary/20">
-
-              {/* Connect the button to the handler and add dynamic text/disabled state */}
               <button
                 onClick={handleCodeSubmission}
                 disabled={isEvaluating || !problem}
@@ -736,21 +674,13 @@ const DsaArena = () => {
               >
                 {isEvaluating ? 'Evaluating...' : 'Submit Code'}
               </button>
-
             </div>
-
           </div>
 
-          {/* Bottom part: AI Feedback (conditionally rendered) */}
           {(isEvaluating || evaluationError || feedback) && (
-
             <div className="flex-1 flex flex-col bg-surface/70 p-4 rounded-lg border border-text-secondary/20 overflow-hidden">
-
               <div className="flex justify-between items-center mb-4 border-b border-text-secondary/20 pb-2 flex-shrink-0">
-
-                <h2 className="text-xl font-bold text-accent">
-                  AI Feedback
-                </h2>
+                <h2 className="text-xl font-bold text-accent">AI Feedback</h2>
 
                 <button
                   onClick={closeFeedbackPanel}
@@ -771,36 +701,23 @@ const DsaArena = () => {
                     />
                   </svg>
                 </button>
-
               </div>
 
               <div className="flex-1 overflow-y-auto pr-2 text-text-secondary">
-
-                {isEvaluating && (
-                  <p>AI is evaluating your code...</p>
-                )}
+                {isEvaluating && <p>AI is evaluating your code...</p>}
 
                 {evaluationError && (
-                  <div className="text-red-400">
-                    Error: {evaluationError}
-                  </div>
+                  <div className="text-red-400">Error: {evaluationError}</div>
                 )}
 
                 {feedback && status && (
-
                   <div className="space-y-4">
-
-                    {/* Colored Status Box */}
                     <div
                       className={`flex items-start gap-3 p-3 rounded-lg border ${status.bg} ${status.border}`}
                     >
-
-                      <div className="mt-0.5">
-                        {status.icon}
-                      </div>
+                      <div className="mt-0.5">{status.icon}</div>
 
                       <div>
-
                         <h4 className={`font-bold ${status.color} mb-1`}>
                           {status.type === 'success'
                             ? 'Solution Correct'
@@ -812,50 +729,34 @@ const DsaArena = () => {
                         <p className="text-sm text-text-primary">
                           {feedback.correctness}
                         </p>
-
                       </div>
-
                     </div>
 
                     <div>
                       <h4 className="font-semibold text-text-primary mb-1">
                         Time Complexity
                       </h4>
-
-                      <p className="text-sm">
-                        {feedback.timeComplexity}
-                      </p>
+                      <p className="text-sm">{feedback.timeComplexity}</p>
                     </div>
 
                     <div>
                       <h4 className="font-semibold text-text-primary mb-1">
                         Space Complexity
                       </h4>
-
-                      <p className="text-sm">
-                        {feedback.spaceComplexity}
-                      </p>
+                      <p className="text-sm">{feedback.spaceComplexity}</p>
                     </div>
 
                     <div>
                       <h4 className="font-semibold text-text-primary mb-1">
                         Optimization
                       </h4>
-
-                      <p className="text-sm">
-                        {feedback.optimization}
-                      </p>
+                      <p className="text-sm">{feedback.optimization}</p>
                     </div>
-
                   </div>
-
                 )}
-
               </div>
             </div>
-
           )}
-
         </div>
       </div>
     </div>

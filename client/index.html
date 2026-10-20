@@ -2,12 +2,49 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+
     <link rel="icon" type="image/png" href="/logo.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+
     <title>PrepAI</title>
+
+    <!--
+      Apply the saved theme before React renders.
+
+      Without this, React's ThemeContext may apply the saved theme
+      only after the initial browser paint, causing a brief flash
+      of the previous/default theme.
+    -->
+    <script>
+      (() => {
+        try {
+          const savedTheme = localStorage.getItem("theme") || "night";
+          const root = document.documentElement;
+
+          root.classList.remove(
+            savedTheme === "vintage" ? "night" : "vintage"
+          );
+
+          root.classList.add(savedTheme);
+        } catch (error) {
+          // If localStorage is unavailable, the application will
+          // fall back to the default theme handled by React.
+          console.warn("Unable to restore saved theme:", error);
+        }
+      })();
+    </script>
   </head>
+
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+
+    <script
+      type="module"
+      src="/src/main.jsx"
+    ></script>
   </body>
 </html>
