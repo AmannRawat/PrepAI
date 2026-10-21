@@ -1,10 +1,16 @@
 import DsaSubmission from "../models/DsaSubmission.model.js";
 import { generateText } from "../services/gemini.service.js";
 import { extractJson } from "../utils/extractJson.js";
+import { executeCode } from "../services/codeExecution.service.js";
+import {
+  sanitizeProblemForClient,
+  resolveAuthoritativeTestCases,
+} from "../utils/testCaseSecurity.js";
+
 
 
 function validateGeneratedProblem(problem) {
-  const languages = ["javascript", "python", "java", "cpp"];
+  const supportedLanguages = ["javascript", "python", "java", "cpp"];
 
   if (
     !problem ||
@@ -29,13 +35,12 @@ function validateGeneratedProblem(problem) {
     !problem.examples.every(
       (example) =>
         example &&
-        typeof example === "object" &&
         typeof example.input === "string" &&
-        example.input.trim().length > 0 &&
+        example.input.trim() &&
         typeof example.output === "string" &&
-        example.output.trim().length > 0 &&
+        example.output.trim() &&
         typeof example.explanation === "string" &&
-        example.explanation.trim().length > 0
+        example.explanation.trim()
     )
   ) {
     return false;
@@ -46,7 +51,7 @@ function validateGeneratedProblem(problem) {
     problem.constraints.length === 0 ||
     !problem.constraints.every(
       (constraint) =>
-        typeof constraint === "string" && constraint.trim().length > 0
+        typeof constraint === "string" && constraint.trim()
     )
   ) {
     return false;
@@ -54,13 +59,55 @@ function validateGeneratedProblem(problem) {
 
   if (
     !problem.boilerplates ||
-    typeof problem.boilerplates !== "object" ||
-    !languages.every(
-      (language) =>
-        typeof problem.boilerplates[language] === "string" &&
-        problem.boilerplates[language].trim().length > 0
-    )
+    typeof problem.boilerplates !== "object"
   ) {
+    return false;
+  }
+
+  for (const language of supportedLanguages) {
+    if (
+      typeof problem.boilerplates[language] !== "string" ||
+      !problem.boilerplates[language].trim()
+    ) {
+      return false;
+    }
+  }
+
+  if (
+    !Array.isArray(problem.testCases) ||
+    problem.testCases.length < 4 ||
+    problem.testCases.length > 20
+  ) {
+    return false;
+  }
+
+  for (const testCase of problem.testCases) {
+    if (
+      !testCase ||
+      typeof testCase !== "object" ||
+      !Object.prototype.hasOwnProperty.call(testCase, "input") ||
+      !Object.prototype.hasOwnProperty.call(
+        testCase,
+        "expectedOutput"
+      ) ||
+      typeof testCase.isHidden !== "boolean"
+    ) {
+      return false;
+    }
+
+    if (
+      testCase.input === undefined ||
+      testCase.expectedOutput === undefined
+    ) {
+      return false;
+    }
+  }
+
+  if (!problem.testCases.some((testCase) => !testCase.isHidden)) {
+    return false;
+  }
+
+  if (!problem.testCases.some((testCase) => testCase.isHidden)) {
     return false;
   }
 
@@ -72,98 +119,97 @@ export async function generateProblem(req, res) {
     const { topic, difficulty } = req.body;
 
     const allowedDifficulties = ["Easy", "Medium", "Hard"];
-    const allowedTopics = [
-      "Arrays",
-      "Binary Search",
-      "Strings",
-      "Linked List",
-      "Recursion",
-      "Trees",
-      "Graphs",
-      "Dynamic Programming",
-      "Greedy",
-      "Stack",
-      "Queue",
-      "Hashing",
-      "Sorting",
-      "Backtracking",
-      "Heap",
-      "Trie",
-      "Bit Manipulation",
-      "Math",
-    ];
 
     if (
       typeof topic !== "string" ||
       !topic.trim() ||
+      topic.trim().length > 100 ||
       typeof difficulty !== "string" ||
       !allowedDifficulties.includes(difficulty)
     ) {
       return res.status(400).json({
-        error: "A valid topic and difficulty (Easy, Medium, or Hard) are required.",
+        error:
+          "A valid topic and difficulty (Easy, Medium, or Hard) are required.",
       });
     }
 
-    // Accept topics outside this list if your frontend supports custom topics.
     const normalizedTopic = topic.trim();
 
     const prompt = `
 You are a professional Data Structures and Algorithms problem setter
-creating coding interview questions for a programming practice platform.
+for a programming interview practice platform.
 
-Generate ONE original, self-contained programming problem.
+Generate ONE original, self-contained function-based DSA problem.
 
 TOPIC: ${normalizedTopic}
 DIFFICULTY: ${difficulty}
 
-DIFFICULTY GUIDELINES:
-- Easy: one fundamental concept, straightforward implementation.
-- Medium: requires meaningful reasoning or combining a small number of concepts.
-- Hard: requires deeper algorithmic insight or a more sophisticated technique.
-Match the actual difficulty to the requested level.
+PROBLEM REQUIREMENTS:
+1. Generate a clear title and an unambiguous problem description.
+2. Include at least two valid examples, each with input, output and explanation.
+3. Include meaningful constraints and edge cases.
+4. Match the requested topic and difficulty.
+5. Do not copy a well-known problem verbatim.
+6. Keep the problem suitable for function-based coding interviews.
+7. The user implements a function or class method. They do NOT parse stdin
+   or print the answer themselves.
+8. Define exactly one primary function or method signature.
+9. All four languages must represent the same algorithmic interface.
+10. Do not put the solution or its algorithm explanation in the description.
 
-PROBLEM QUALITY REQUIREMENTS:
-1. The problem must be solvable using the requested topic.
-2. Write a clear title and a complete, unambiguous description.
-3. Include all necessary input details, output requirements, and constraints.
-4. Include at least two valid examples with correct outputs.
-5. Include an explanation for each example.
-6. Cover important edge cases through examples or constraints.
-7. Make constraints realistic and sufficient to reason about complexity.
-8. Avoid relying on unstated assumptions.
-9. Do not copy a well-known problem verbatim. Create a meaningfully distinct variant.
-10. Ensure the examples agree with the description and constraints.
-11. Use a consistent function name and parameter list across all four languages.
-12. The function should return the expected result rather than print it,
-    unless the problem explicitly requires otherwise.
-13. Do not include solutions, hints, or algorithm explanations in the description.
+FUNCTION INTERFACE:
+- JavaScript: a named function that returns the answer.
+- Python: a named function that returns the answer.
+- Java: a public method in class Solution that returns the answer.
+- C++: a public method in class Solution that returns the answer.
+- Choose suitable parameter and return types for the problem.
+- Use standard JSON-compatible values for test inputs and expected outputs.
+- Arrays map to language-appropriate arrays/lists/vectors.
+- Strings map to strings.
+- Integers and booleans map to equivalent primitive types.
+- Use nested arrays or objects only if the problem needs them.
+- Do not use custom data structures unless their interface is fully defined.
 
-BOILERPLATE REQUIREMENTS:
-- JavaScript: valid function declaration.
-- Python: valid function declaration with an appropriate body placeholder.
-- Java: valid class and method signature.
-- C++: valid class and public method signature.
-- Use equivalent parameter types and return types across languages.
-- Choose a signature that matches the problem's inputs and expected output.
-- Avoid including a complete solution in the boilerplate.
+TEST CASE REQUIREMENTS:
+1. Generate between 6 and 10 test cases.
+2. Every test case must contain:
+   - input: an object whose keys match the function parameters.
+   - expectedOutput: the exact expected return value.
+   - isHidden: a boolean.
+3. Include at least two visible cases and at least three hidden cases.
+4. Cover normal cases, boundary cases and relevant edge cases.
+5. Ensure each expectedOutput is correct for its input.
+6. Test inputs and expected outputs must be JSON-serializable.
+7. Do not use undefined, NaN, Infinity, functions, or language-specific objects.
+8. Every test case must match the same function signature.
+9. Do not make hidden test cases visible in the problem description or examples.
+10. Examples must agree with their corresponding visible test cases.
 
-RETURN ONLY A VALID JSON OBJECT.
-Do not wrap the JSON in Markdown fences or add commentary.
+BOILERPLATES:
+- Provide valid starter code for JavaScript, Python, Java and C++.
+- Include the function or method signature and a placeholder body.
+- Do not include a complete solution.
+- Use the exact same logical parameter names and return behavior in all languages.
+- Java and C++ must use class Solution.
+- Avoid unsupported or ambiguous types.
+
+OUTPUT:
+Return ONLY one valid JSON object without Markdown fences.
 
 Use exactly this schema:
 {
   "title": "Problem title",
-  "description": "Complete problem statement, including constraints",
+  "description": "Complete problem statement",
   "examples": [
     {
-      "input": "Input representation",
-      "output": "Expected output",
-      "explanation": "Why this output is correct"
+      "input": "Human-readable input",
+      "output": "Human-readable output",
+      "explanation": "Why the output is correct"
     },
     {
-      "input": "Input representation",
-      "output": "Expected output",
-      "explanation": "Why this output is correct"
+      "input": "Human-readable input",
+      "output": "Human-readable output",
+      "explanation": "Why the output is correct"
     }
   ],
   "constraints": [
@@ -175,34 +221,52 @@ Use exactly this schema:
     "python": "def example_name(arg):\\n    pass",
     "java": "class Solution { public ReturnType exampleName(Type arg) { } }",
     "cpp": "class Solution { public: ReturnType exampleName(Type arg) { } };"
-  }
+  },
+  "testCases": [
+    {
+      "input": {
+        "arg": "example value"
+      },
+      "expectedOutput": "expected result",
+      "isHidden": false
+    },
+    {
+      "input": {
+        "arg": "another value"
+      },
+      "expectedOutput": "another result",
+      "isHidden": true
+    }
+  ]
 }
 
-The boilerplate examples above are placeholders, not literal signatures to copy.
-Replace them with signatures appropriate to the generated problem.
+The schema examples are illustrative. Generate the correct parameter names,
+types, boilerplates, examples and expected outputs for the actual problem.
 
-Before returning the JSON, internally check:
-- The problem is complete and unambiguous.
-- Each example output follows from the problem statement.
-- Constraints are included and meaningful.
-- All four boilerplates represent the same function.
-- The JSON is syntactically valid.
+FINAL SELF-CHECK:
+- JSON syntax is valid.
+- Every test case input has the correct parameters.
+- All expected outputs match the problem's intended behavior.
+- At least two test cases are visible and at least three are hidden.
+- Every language has a compatible function-based starter.
+- No solution code is included.
 `;
 
     const responseText = await generateText(prompt);
     const problem = extractJson(responseText);
 
-    // Validate the shape before returning the AI-generated problem.
-
     if (!validateGeneratedProblem(problem)) {
       console.error("Invalid generated DSA problem:", problem);
 
       return res.status(502).json({
-        error: "The AI generated an invalid problem. Please try again.",
+        error:
+          "The AI generated an invalid problem. Please try again.",
       });
     }
 
-    return res.status(200).json(problem);
+    // Sanitize problem so hidden test inputs/outputs are never sent to the browser
+    const clientSafeProblem = sanitizeProblemForClient(problem);
+    return res.status(200).json(clientSafeProblem);
   } catch (error) {
     console.error("Error generating problem:", error);
 
@@ -212,15 +276,92 @@ Before returning the JSON, internally check:
   }
 }
 
-
-export async function evaluateCode(req, res) {
+/**
+ * Runs code against visible / sample test cases ONLY.
+ * Does not execute hidden test cases, and does not save a final submission.
+ */
+export async function runCode(req, res) {
   try {
-    const { problem, code, language, topic } = req.body;
-
+    const { problem, code, language, problemId: bodyProblemId } = req.body;
     const supportedLanguages = ["javascript", "python", "java", "cpp"];
+
+    const problemId =
+      (problem && (problem.id || problem.problemId || problem._id)) ||
+      bodyProblemId;
+
+    console.log(`[DSA Controller Dev] runCode received problem ID: ${problemId}`);
+
+    if (problem && problemId) {
+      problem.id = problemId;
+      problem.problemId = problemId;
+    }
 
     if (
       !problem ||
+      !problemId ||
+      typeof problem.title !== "string" ||
+      typeof code !== "string" ||
+      !code.trim() ||
+      !supportedLanguages.includes(language)
+    ) {
+      return res.status(400).json({
+        error:
+          "A valid problem with an ID, non-empty code, and supported language are required.",
+      });
+    }
+
+    // Authoritatively resolve visible sample test cases only
+    const visibleTestCases = resolveAuthoritativeTestCases(problem, {
+      visibleOnly: true,
+    });
+    const strictlyVisible = visibleTestCases.filter((tc) => !tc.isHidden);
+
+    if (strictlyVisible.length === 0) {
+      return res.status(400).json({
+        error: "No sample test cases found for this problem.",
+      });
+    }
+
+    const executionResult = await executeCode({
+      code,
+      language,
+      testCases: strictlyVisible,
+      isRunCode: true,
+    });
+
+    return res.status(200).json(executionResult);
+  } catch (error) {
+    console.error("Error running code:", error.message);
+    return res.status(400).json({
+      error: error.message || "Failed to execute code against sample test cases.",
+    });
+  }
+}
+
+/**
+ * Submits solution for full evaluation against ALL test cases (visible + hidden),
+ * obtains AI code review feedback, persists the submission, and returns combined results.
+ */
+export async function evaluateCode(req, res) {
+  try {
+    const { problem, code, language, topic, problemId: bodyProblemId } = req.body;
+
+    const supportedLanguages = ["javascript", "python", "java", "cpp"];
+
+    const problemId =
+      (problem && (problem.id || problem.problemId || problem._id)) ||
+      bodyProblemId;
+
+    console.log(`[DSA Controller Dev] evaluateCode received problem ID: ${problemId}`);
+
+    if (problem && problemId) {
+      problem.id = problemId;
+      problem.problemId = problemId;
+    }
+
+    if (
+      !problem ||
+      !problemId ||
       typeof problem.title !== "string" ||
       typeof problem.description !== "string" ||
       typeof code !== "string" ||
@@ -231,16 +372,59 @@ export async function evaluateCode(req, res) {
     ) {
       return res.status(400).json({
         error:
-          "A valid problem, non-empty code, topic, and supported language are required.",
+          "A valid problem with an ID, non-empty code, topic, and supported language are required.",
       });
     }
 
-    const prompt = `
+    // Step 1: Authoritatively resolve the complete test suite (visible + hidden)
+    const fullTestCases = resolveAuthoritativeTestCases(problem, {
+      visibleOnly: false,
+    });
+
+    if (!Array.isArray(fullTestCases) || fullTestCases.length === 0) {
+      return res.status(400).json({
+        error:
+          "Authoritative test cases could not be verified. Please regenerate the problem.",
+      });
+    }
+
+    // Step 2: Execute solution against authoritative test cases
+    let executionResult;
+    try {
+      executionResult = await executeCode({
+        code,
+        language,
+        testCases: fullTestCases,
+        isRunCode: false,
+      });
+    } catch (execErr) {
+      console.error("Execution error during evaluation:", execErr.message);
+      return res.status(400).json({
+        error: execErr.message || "Failed to execute code against test cases.",
+      });
+    }
+
+    // Step 3: Run Gemini code review (kept separate from test verdict determination)
+    let aiFeedback = {
+      correctness:
+        executionResult.verdict === "Accepted"
+          ? "All test cases passed successfully."
+          : `Solution resulted in verdict '${executionResult.verdict}' (${executionResult.passed}/${executionResult.total} test cases passed).`,
+      timeComplexity: "O(n)",
+      spaceComplexity: "O(1)",
+      optimization: "No optimizations required.",
+    };
+
+    try {
+      const prompt = `
 You are a careful DSA interview code reviewer.
 
 Review the submitted code against the problem statement.
-Be technically precise, explain mistakes constructively, and do not
-claim that code has been compiled or executed.
+Be technically precise, explain mistakes constructively.
+
+EXECUTION RESULT:
+Verdict: ${executionResult.verdict}
+Passed test cases: ${executionResult.passed} / ${executionResult.total}
 
 PROBLEM TITLE:
 ${problem.title}
@@ -263,80 +447,82 @@ ${code.slice(0, 20000)}
 </user_code>
 
 REVIEW REQUIREMENTS:
-
 1. Correctness:
-   Assess whether the code appears logically correct for the stated
-   problem. Consider boundary conditions, empty or minimal inputs where
-   allowed, duplicates, negative values where allowed, and other relevant
-   edge cases.
+   Assess whether the code is logically correct. If tests failed with verdict ${executionResult.verdict}, explain the likely bug or logic mismatch.
+2. Time complexity: Big O complexity and justification.
+3. Space complexity: Auxiliary space complexity and justification.
+4. Optimization: Specific actionable recommendations.
 
-2. Time complexity:
-   Give Big O complexity and a brief justification. If the code is
-   incomplete or its behavior cannot be determined, state that limitation.
-
-3. Space complexity:
-   Give auxiliary space complexity and a brief justification.
-   Distinguish auxiliary space from input storage when relevant.
-
-4. Optimization:
-   Give specific, actionable improvements. If the approach is already
-   asymptotically optimal, say so.
-
-IMPORTANT:
-- Do not confuse plausible reasoning with executed test results.
-- Do not say all test cases pass.
-- Do not assume the code compiles successfully.
-- Identify syntax errors or missing implementation when apparent.
-- Do not invent problem constraints.
-- If the statement is ambiguous, explain how that affects your assessment.
-- Keep each field concise and useful for an interview candidate.
-- Return only one valid JSON object, without Markdown fences or commentary.
-
-Required JSON structure:
+Return only one valid JSON object:
 {
-  "correctness": "Assessment and relevant edge cases",
-  "timeComplexity": "Big O complexity and justification",
-  "spaceComplexity": "Big O complexity and justification",
-  "optimization": "Specific actionable recommendations"
+  "correctness": "Assessment",
+  "timeComplexity": "Big O and justification",
+  "spaceComplexity": "Big O and justification",
+  "optimization": "Recommendations"
 }
 `;
 
-    const responseText = await generateText(prompt);
-    const parsedResponse = extractJson(responseText);
+      const responseText = await generateText(prompt);
+      const parsed = extractJson(responseText);
 
-    if (
-      !parsedResponse ||
-      typeof parsedResponse !== "object" ||
-      Array.isArray(parsedResponse) ||
-      !["correctness", "timeComplexity", "spaceComplexity", "optimization"]
-        .every(
-          (field) =>
-            typeof parsedResponse[field] === "string" &&
-            parsedResponse[field].trim().length > 0
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        ["correctness", "timeComplexity", "spaceComplexity", "optimization"].every(
+          (field) => typeof parsed[field] === "string" && parsed[field].trim()
         )
-    ) {
-      console.error("Invalid code evaluation response:", parsedResponse);
-
-      return res.status(502).json({
-        error: "The AI returned an invalid evaluation. Please try again.",
-      });
+      ) {
+        aiFeedback = {
+          correctness: parsed.correctness.trim(),
+          timeComplexity: parsed.timeComplexity.trim(),
+          spaceComplexity: parsed.spaceComplexity.trim(),
+          optimization: parsed.optimization.trim(),
+        };
+      }
+    } catch (geminiError) {
+      console.error(
+        "Gemini review error (proceeding with execution result):",
+        geminiError.message
+      );
     }
 
-    const newSubmission = new DsaSubmission({
-      user: req.user.id,
-      problem: {
-        title: problem.title,
-        description: problem.description,
-      },
-      topic,
-      language,
-      code,
-      feedback: parsedResponse,
+    // Step 4: Persist submission to database using DsaSubmission model
+    try {
+      const newSubmission = new DsaSubmission({
+        user: req.user.id,
+        problem: {
+          title: problem.title,
+          description: problem.description,
+        },
+        topic,
+        language,
+        code,
+        verdict: executionResult.verdict,
+        passed: executionResult.passed,
+        total: executionResult.total,
+        executionTime: executionResult.executionTime,
+        feedback: aiFeedback,
+      });
+
+      await newSubmission.save();
+    } catch (saveError) {
+      console.error("Error saving DSA submission to database:", saveError);
+    }
+
+    // Step 5: Return response with execution results and backward-compatible feedback
+    return res.status(200).json({
+      verdict: executionResult.verdict,
+      passed: executionResult.passed,
+      total: executionResult.total,
+      testResults: executionResult.testResults,
+      executionTime: executionResult.executionTime,
+      error: executionResult.error || null,
+      correctness: aiFeedback.correctness,
+      timeComplexity: aiFeedback.timeComplexity,
+      spaceComplexity: aiFeedback.spaceComplexity,
+      optimization: aiFeedback.optimization,
+      feedback: aiFeedback,
     });
-
-    await newSubmission.save();
-
-    return res.status(200).json(parsedResponse);
   } catch (error) {
     console.error("Error evaluating code:", error);
 
@@ -345,6 +531,7 @@ Required JSON structure:
     });
   }
 }
+
 
 
 const SUPPORTED_LANGUAGES = ["javascript", "python", "java", "cpp"];

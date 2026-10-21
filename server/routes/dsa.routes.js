@@ -3,6 +3,7 @@ import authMiddleware from "../middleware/auth.middleware.js";
 
 import {
   generateProblem,
+  runCode,
   evaluateCode,
   getHint,
   explainApproach,
@@ -13,6 +14,7 @@ const router = Router();
 
 router.post("/generate-problem", generateProblem);
 
+router.post("/run-code", authMiddleware, runCode);
 router.post("/evaluate-code", authMiddleware, evaluateCode);
 
 // DSA Coach endpoints

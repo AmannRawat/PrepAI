@@ -21,6 +21,24 @@ const dsaSubmissionSchema = new Schema({
     // The user's code
     language: String,
     code: String,
+
+    // Execution results
+    verdict: {
+        type: String,
+        default: null,
+    },
+    passed: {
+        type: Number,
+        default: 0,
+    },
+    total: {
+        type: Number,
+        default: 0,
+    },
+    executionTime: {
+        type: String,
+        default: null,
+    },
     
     // The AI's feedback
     feedback: {
