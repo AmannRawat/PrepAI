@@ -10,8 +10,160 @@ import {
   sanitizeProblemForClient,
   resolveAuthoritativeTestCases,
 } from "../utils/testCaseSecurity.js";
+import {
+  getCompanyQuestions,
+  getAvailableCompanies,
+  COMPANY_CATALOG_DISCLAIMER,
+} from "../services/companyQuestion.service.js";
+import { normalizeCompanyName } from "../utils/companyNormalizer.js";
+import {
+  evaluateAdaptiveDifficulty,
+  extractExplicitDifficulty,
+  ADAPTIVE_DIFFICULTY_CONFIG,
+} from "../services/adaptiveDifficulty.service.js";
 
+/**
+ * Extracts requested question count from user message.
+ * Defaults to 1 for singular questions ("a question", "an amazon ... question", "one"),
+ * extracts specific counts ("five", "5", "3"), and defaults to 5 for multi/list requests.
+ */
+export function extractQuestionCount(message) {
+  if (!message || typeof message !== "string") return 1;
+  const text = message.trim().toLowerCase();
 
+  const wordMap = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+  };
+
+  // Pattern for explicit count before company/difficulty/question: e.g. "five amazon medium-level dsa questions", "5 questions"
+  const countPattern = /\b(one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\s*(?:company\s*)?(?:easy|medium|hard\s*)?(?:-level\s*)?(?:dsa\s*)?(?:questions?|problems?|leetcode)\b/i;
+  const countMatch = text.match(countPattern);
+  if (countMatch) {
+    const raw = countMatch[1].toLowerCase();
+    const parsed = wordMap[raw] || parseInt(raw, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      return Math.min(parsed, 10);
+    }
+  }
+
+  // Pattern for commands like "give me 5", "list 3", "show 10"
+  const prefixPattern = /\b(?:give me|show me|list|find|get)\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\b/i;
+  const prefixMatch = text.match(prefixPattern);
+  if (prefixMatch) {
+    const raw = prefixMatch[1].toLowerCase();
+    const parsed = wordMap[raw] || parseInt(raw, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      return Math.min(parsed, 10);
+    }
+  }
+
+  // Explicit singular: "a question", "an amazon ... question", "a dsa question", "single question"
+  if (/\b(?:a|an|single)\s+[\w\s-]*?\b(?:question|problem)\b/i.test(text)) {
+    return 1;
+  }
+
+  // Plural indicator without explicit number: "questions", "problems", "list", "some"
+  if (/\b(?:questions|problems|list\s+of|some)\b/i.test(text)) {
+    return 5;
+  }
+
+  // Default to 1 for singular intent
+  return 1;
+}
+
+/**
+ * Formats company question catalog search results with verified data fidelity,
+ * preserving real title, company, difficulty, slug, and canonical source URL as clean clickable links.
+ * Avoids malformed nested markdown, eliminates unnecessary raw debug fields, keeps source attribution
+ * concise and separate, and clearly states Arena loading limitations.
+ */
+export function formatCatalogQuestionsResponse(company, difficulty, questionsResult, isSingle = false) {
+  const questions = questionsResult?.questions || [];
+  if (questions.length === 0) {
+    return formatCatalogMissResponse(company, difficulty);
+  }
+
+  const attribution = `*(Source: Community LeetCode catalog • Not an official ${company} endorsement)*`;
+
+  if (isSingle || questions.length === 1) {
+    const q = questions[0];
+    const topicsStr = q.topics?.length ? ` (${q.topics.join(", ")})` : "";
+    return (
+      `Here is a popular **${company}**${difficulty ? ` ${difficulty}` : ""} interview question from our community catalog:\n\n` +
+      `📌 [${q.title}](${q.url}) — \`${q.difficulty}\`${topicsStr}\n\n` +
+      `*Note: This is a reference LeetCode question. Because our catalog stores reference metadata rather than complete runnable test suites and starter code, it cannot be loaded directly into the DSA Arena. You can practice it on LeetCode via the link above!*\n\n` +
+      `*If you'd like a runnable problem to code right here in the Arena, just ask: "Generate an original AI practice problem on this topic!"*\n\n` +
+      `${attribution}`
+    );
+  }
+
+  const qList = questions
+    .map(
+      (q, i) =>
+        `${i + 1}. [${q.title}](${q.url}) — \`${q.difficulty}\`${q.topics?.length ? ` • ${q.topics.slice(0, 3).join(", ")}` : ""}`
+    )
+    .join("\n");
+
+  return (
+    `Here are matching interview questions for **${company}**${difficulty ? ` (${difficulty})` : ""} from our community catalog:\n\n` +
+    `${qList}\n\n` +
+    `*Note: These are reference LeetCode questions containing metadata and links. They cannot be loaded as runnable Arena problems. To practice runnable code in the Arena, ask for an original AI practice problem on any of these topics!*\n\n` +
+    `${attribution}`
+  );
+}
+
+/**
+ * Formats a catalog miss notice explicitly stating that no matching questions exist
+ * for the requested company/difficulty/topic, and prompts the user whether they would like
+ * a separately labelled AI-generated practice problem.
+ */
+export function formatCatalogMissResponse(company, difficulty, topic) {
+  const criteria = [difficulty, topic].filter(Boolean).join(" ");
+  const criteriaStr = criteria ? ` matching **${criteria}**` : "";
+  return (
+    `I searched our company question catalog, but found no${criteriaStr} questions for **${company}** in the database.\n\n` +
+    `Popular companies with extensive question catalogs include **Amazon**, **Google**, **Meta**, **Microsoft**, **Apple**, and **Uber**.\n\n` +
+    `Would you like me to generate a separately labelled, original AI practice problem on this topic for your DSA Arena?`
+  );
+}
+
+/**
+ * Enforces that an AI-generated problem is NEVER described as a retrieved or verified company interview question.
+ * Ensures the response contains an explicit AI-generated practice label.
+ */
+export function sanitizeAiProblemConfirmation(rawAnswer, result, detectedCompany) {
+  let cleaned = (rawAnswer || "").trim();
+
+  // Guardrail 1: Disallow false claims of catalog retrieval or verified interview status
+  const falseClaimRegex = /\b(?:retrieved\s+from|pulled\s+from|from\s+the\s+catalog|catalog\s+question|verified\s+[\w\s]*question|actual\s+[\w\s]*interview\s+question|official\s+[\w\s]*question)\b/gi;
+  if (falseClaimRegex.test(cleaned)) {
+    cleaned = cleaned.replace(
+      falseClaimRegex,
+      "AI-generated practice challenge (not retrieved from catalog)"
+    );
+  }
+
+  // Guardrail 2: Ensure explicit AI-generated label is always present
+  if (!/\b(?:ai-generated|ai practice|original practice)\b/i.test(cleaned)) {
+    cleaned = `[AI-Generated Practice Problem] ${cleaned}`;
+  }
+
+  // Guardrail 3: If a company was detected, clarify that it is modeled after company topics, not retrieved from catalog
+  if (detectedCompany && !cleaned.includes("modeled after")) {
+    cleaned += ` (Note: This is an original AI practice problem modeled after ${detectedCompany} interview topics, not a verified question from the catalog.)`;
+  }
+
+  return cleaned;
+}
 
 function validateGeneratedProblem(problem) {
   const supportedLanguages = ["javascript", "python", "java", "cpp"];
@@ -257,6 +409,8 @@ FINAL SELF-CHECK:
 
   // Sanitize problem so hidden test inputs/outputs are never sent to the browser
   const clientSafeProblem = sanitizeProblemForClient(problem);
+  clientSafeProblem.difficulty = matchedDifficulty;
+  clientSafeProblem.topic = normalizedTopic;
   return {
     problem: clientSafeProblem,
     topic: normalizedTopic,
@@ -272,24 +426,28 @@ export async function generateProblem(req, res) {
       });
     }
 
-    const { topic, difficulty } = req.body;
+    let { topic, difficulty } = req.body;
 
     const allowedDifficulties = ["Easy", "Medium", "Hard"];
 
-    if (
-      typeof topic !== "string" ||
-      !topic.trim() ||
-      topic.trim().length > 100 ||
-      typeof difficulty !== "string" ||
-      !allowedDifficulties.includes(difficulty)
-    ) {
-      return res.status(400).json({
-        error:
-          "A valid topic and difficulty (Easy, Medium, or Hard) are required.",
-      });
+    let normalizedTopic = String(topic || "Arrays").trim();
+    if (!normalizedTopic || normalizedTopic.length > 100) {
+      normalizedTopic = "Arrays";
     }
 
-    const result = await createDsaProblem({ topic, difficulty });
+    if (!difficulty || !allowedDifficulties.includes(difficulty)) {
+      let userSubmissions = [];
+      if (mongoose.connection.readyState === 1) {
+        userSubmissions = await DsaSubmission.find({ user: req.user.id });
+      }
+      const adaptive = evaluateAdaptiveDifficulty({
+        submissions: userSubmissions,
+        topic: normalizedTopic,
+      });
+      difficulty = adaptive.targetDifficulty;
+    }
+
+    const result = await createDsaProblem({ topic: normalizedTopic, difficulty });
     return res.status(200).json(result.problem);
   } catch (error) {
     console.error("Error generating problem:", error);
@@ -530,6 +688,10 @@ Return only one valid JSON object:
 
     // Step 4: Persist submission to database using DsaSubmission model
     try {
+      const submissionDifficulty =
+        problem.difficulty || req.body.difficulty || "Medium";
+      const hintsUsed = Number(req.body.hintsUsed) || 0;
+
       const newSubmission = new DsaSubmission({
         user: req.user.id,
         problemId: problemId ? String(problemId) : null,
@@ -537,7 +699,10 @@ Return only one valid JSON object:
           id: problemId ? String(problemId) : null,
           title: problem.title,
           description: problem.description,
+          difficulty: submissionDifficulty,
         },
+        difficulty: submissionDifficulty,
+        hintsUsed,
         topic,
         language,
         code,
@@ -847,14 +1012,108 @@ export async function coachChat(req, res) {
 
     // Fetch user submission history to ground personalized plans in real performance
     let userStats = null;
+    let userSubmissionsList = [];
     if (userId && mongoose.Types.ObjectId.isValid(userId) && mongoose.connection.readyState === 1) {
       try {
         const userSubmissions = await DsaSubmission.find({ user: userId });
+        userSubmissionsList = userSubmissions;
         userStats = calculateDsaStats(userSubmissions);
       } catch (statsErr) {
         console.warn("Failed to fetch user submissions for coach context:", statsErr.message);
       }
     }
+
+    // Detect company question intent, difficulty, and topic filters if present in message
+    let detectedCompany = null;
+    let companyQuestionsResult = null;
+    let filterDifficulty = null;
+    let filterTopic = null;
+
+    const companyRegex = /\b(amazon|amzn|google|goog|microsoft|msft|meta|facebook|fb|apple|aapl|netflix|nflx|uber|lyft|salesforce|adobe|bloomberg|goldman\s*sachs|goldman|jpmorgan|jp\s*morgan|morgan\s*stanley|stripe|bytedance|tiktok|atlassian|palantir|twitter|x|linkedin|walmart|oracle|cisco|airbnb|amd|nvidia|intel|snowflake|databricks|spotify|pinterest|snap|snapchat|dropbox|coinbase|robinhood|barclays|blackrock|blackstone)\b/i;
+    const companyMatch = trimmedMessage.match(companyRegex);
+
+    if (companyMatch) {
+      detectedCompany = normalizeCompanyName(companyMatch[1]);
+    }
+
+    const diffMatch = trimmedMessage.match(/\b(easy|medium|hard)\b/i);
+    if (diffMatch) {
+      filterDifficulty = diffMatch[1][0].toUpperCase() + diffMatch[1].slice(1).toLowerCase();
+    }
+
+    const topicMatch = trimmedMessage.match(/\b(array|arrays|string|strings|dynamic programming|dp|tree|trees|graph|graphs|binary search|hash table|hash map|two pointers|stack|queue|recursion|greedy|heap|linked list)\b/i);
+    if (topicMatch) {
+      filterTopic = topicMatch[1];
+    }
+
+    // Evaluate adaptive difficulty based on user's real performance history
+    const explicitDiffFromMsg = extractExplicitDifficulty(trimmedMessage);
+    const targetTopicForAssessment = filterTopic || (problem?.topic || "Arrays");
+    let adaptiveAssessment = null;
+
+    try {
+      adaptiveAssessment = evaluateAdaptiveDifficulty({
+        submissions: userSubmissionsList,
+        topic: targetTopicForAssessment,
+        requestedDifficulty: explicitDiffFromMsg || filterDifficulty,
+        message: trimmedMessage,
+        userProfile: activeProfile,
+        activePlan,
+      });
+    } catch (evalErr) {
+      console.warn("Adaptive difficulty evaluation encountered a recoverable issue, using safe default:", evalErr);
+      const fallbackDiff = explicitDiffFromMsg || filterDifficulty || "Medium";
+      adaptiveAssessment = {
+        targetDifficulty: fallbackDiff,
+        currentDifficulty: fallbackDiff,
+        action: "maintain",
+        reason: "Practicing at standard difficulty.",
+        isExplicit: Boolean(explicitDiffFromMsg || filterDifficulty),
+        recentSummary: {
+          consecutiveSolves: 0,
+          consecutiveFailures: 0,
+          averageHints: 0,
+          averagePassRatio: 0,
+        },
+      };
+    }
+
+    if (companyMatch) {
+      const excludeSlugs = userSubmissionsList
+        .map((s) => s.problemId || (s.problem?.title ? s.problem.title.toLowerCase().replace(/\s+/g, "-") : null))
+        .filter(Boolean)
+        .slice(-20);
+
+      const requestedCount = extractQuestionCount(trimmedMessage);
+      const effectiveCompanyDifficulty = filterDifficulty || adaptiveAssessment.targetDifficulty;
+
+      try {
+        if (mongoose.connection.readyState === 1) {
+          companyQuestionsResult = await getCompanyQuestions({
+            company: detectedCompany,
+            difficulty: effectiveCompanyDifficulty,
+            topic: filterTopic,
+            limit: requestedCount,
+            excludeSlugs,
+          });
+        }
+      } catch (catErr) {
+        console.warn("Failed to retrieve company questions for prompt:", catErr.message);
+      }
+    }
+
+    const isExplicitAiGenRequest =
+      /\b(?:ai-generated|ai generated|ai practice|generate an? ai|create an? ai|original ai|synthetic)\b/i.test(trimmedMessage);
+
+    const isCompanyQuestionQuery =
+      /\b(?:question|questions|problem|problems|interview questions|dsa questions|leetcode|give me|show me|find|list|tag|tags|catalog)\b/i.test(trimmedMessage) ||
+      Boolean(filterDifficulty) ||
+      Boolean(filterTopic);
+
+    const isCompanyCatalogRequest =
+      Boolean(detectedCompany) &&
+      !isExplicitAiGenRequest &&
+      isCompanyQuestionQuery;
 
     // Build context
     let contextPrompt = `You are Pepe, PrepAI's intelligent, friendly, encouraging, and technically sharp DSA coach.
@@ -907,6 +1166,16 @@ INSTRUCTIONS FOR STUDY PLAN CREATION / UPDATES:
 - Formulate a balanced starter plan based on their stated target companies, weak topics, and daily available study time without mentioning negative stats.
 `;
       }
+    }
+
+    if (adaptiveAssessment) {
+      contextPrompt += `\nADAPTIVE DIFFICULTY ASSESSMENT:
+- Current Demonstrated Level: ${adaptiveAssessment.currentDifficulty}
+- Recommended Next Difficulty: ${adaptiveAssessment.targetDifficulty} (${adaptiveAssessment.action.toUpperCase()} action)
+- Performance Context: ${adaptiveAssessment.reason}
+- Recent Performance Metrics: ${adaptiveAssessment.recentSummary.consecutiveSolves} consecutive solves, ${adaptiveAssessment.recentSummary.consecutiveFailures} consecutive failures, ${adaptiveAssessment.recentSummary.averageHints} avg hints used, ${Math.round(adaptiveAssessment.recentSummary.averagePassRatio * 100)}% test pass ratio.
+${adaptiveAssessment.isExplicit ? "- NOTE: User explicitly specified difficulty or requested to maintain level. Honor their preference." : "- Apply this recommended difficulty when generating or selecting practice problems."}
+`;
     }
 
     if (problem && problem.title) {
@@ -1027,11 +1296,14 @@ INSTRUCTIONS:
    - Acknowledge those details warmly.
    - Enclose updated profile fields in \`[PROFILE_JSON]{"targetCompanies": "...", "weakTopics": "...", "dailyTime": "...", "topicsCovered": "..."}[/PROFILE_JSON]\`.
    - Never re-ask questions that are already answered in USER ONBOARDING PROFILE.
-3. If the user asks to generate, create, load, or practice a DSA problem (e.g. "Generate a medium Array problem for me", "Give me a hard DP problem", "Generate another problem", "Can you load a tree question?"):
+3. If the user asks to generate, create, load, or practice a general DSA problem (and is NOT asking for questions from a specific company catalog):
+   - Choose topic from user message, weak topics, or study plan (default to Arrays).
+   - Adapt to the recommended difficulty (${adaptiveAssessment.targetDifficulty}) unless user explicitly requested another.
    - YOU MUST call the generate_problem tool:
      [TOOL_CALL:generate_problem]
-     {"topic": "<extracted topic or Arrays>", "difficulty": "<Easy | Medium | Hard>"}
+     {"topic": "<extracted topic or Arrays>", "difficulty": "${adaptiveAssessment.targetDifficulty}"}
      [/TOOL_CALL]
+   - Explain the difficulty choice naturally, briefly, and warmly in Pepe's voice based on their performance: "${adaptiveAssessment.reason}".
    - DO NOT write a problem statement, description, or test cases in your chat text. The arena will load it automatically!
 4. If the user asks for a study plan or to personalize/revise their plan:
    - Provide a concise conversational overview.
@@ -1056,6 +1328,63 @@ INSTRUCTIONS:
 7. If the user expresses frustration or says "You can't talk", reply politely, humorously, and helpfully.
 8. Keep conversational text clear, concise, and formatted in standard Markdown.
 `;
+
+      if (isCompanyCatalogRequest && companyQuestionsResult && companyQuestionsResult.questions && companyQuestionsResult.questions.length > 0) {
+        const isSingleQuestionRequest = extractQuestionCount(trimmedMessage) === 1;
+
+        if (isSingleQuestionRequest) {
+          const selectedQ = companyQuestionsResult.questions[0];
+          contextPrompt += `\nCOMPANY-SPECIFIC DSA QUESTION FOUND FOR ${detectedCompany}:
+The user asked for a single company question for ${detectedCompany}.
+Selected matching community-tracked LeetCode question from our MongoDB catalog:
+- Title: ${selectedQ.title}
+- Difficulty: ${selectedQ.difficulty}
+- LeetCode URL: ${selectedQ.url}
+- Topics: ${selectedQ.topics?.length ? selectedQ.topics.join(", ") : "General"}
+
+INSTRUCTIONS FOR PRESENTING THIS COMPANY QUESTION:
+1. Feature this single selected question with its clean clickable link: [${selectedQ.title}](${selectedQ.url}) and difficulty badge \`${selectedQ.difficulty}\`. Do NOT use malformed nested markdown like **[Title](url)** or escaped brackets.
+2. DO NOT invent, substitute, or hallucinate any other questions.
+3. Respond warmly in your natural Pepe voice and conversational style (match the user's language: Hindi, Hinglish, or English).
+4. Clearly explain that because this catalog entry contains reference metadata/links rather than complete runnable test cases and starter code, it cannot yet be loaded as a runnable problem into the DSA Arena. They can solve it on LeetCode via the link above.
+5. Offer to generate an original AI practice problem on this topic if they would like to practice writing and executing code right here in the DSA Arena.
+6. Include this concise attribution on its own line:
+   *(Source: Community LeetCode catalog • Not an official ${detectedCompany} endorsement)*
+7. DO NOT call [TOOL_CALL:generate_problem] or attempt to load a problem into the DSA Arena. The response action must be chat only.
+`;
+        } else {
+          contextPrompt += `\nCOMPANY-SPECIFIC DSA QUESTIONS FOUND FOR ${detectedCompany}:
+The user asked about interview questions for ${detectedCompany}.
+Here are the actual matching community-tracked LeetCode questions retrieved from our MongoDB catalog:
+${JSON.stringify(companyQuestionsResult.questions, null, 2)}
+
+INSTRUCTIONS FOR PRESENTING COMPANY QUESTIONS:
+1. List ONLY the actual matching catalog records provided above (${companyQuestionsResult.questions.map((q) => `"${q.title}"`).join(", ")}).
+2. DO NOT invent, substitute, or hallucinate any other questions.
+3. Use clean clickable links: [Title](url) and difficulty badges. Do NOT use malformed nested markdown like **[Title](url)**, and do NOT dump raw database debug fields (like slug, frequency, recency).
+4. State clearly that these reference questions contain metadata/links and cannot yet be loaded as runnable Arena problems without complete test cases.
+5. Offer to generate an original AI practice problem on any of these topics if they want to code in the DSA Arena.
+6. Include this concise attribution on its own line:
+   *(Source: Community LeetCode catalog • Not an official ${detectedCompany} endorsement)*
+7. DO NOT call [TOOL_CALL:generate_problem] or attempt to load a problem into the DSA Arena. The response action must be chat only.
+`;
+        }
+      } else if (isCompanyCatalogRequest) {
+        contextPrompt += `\nCOMPANY-SPECIFIC QUESTION CATALOG MISS FOR ${detectedCompany}:
+The user asked about questions for ${detectedCompany}${filterDifficulty ? ` (${filterDifficulty})` : ""}, but no matching questions currently exist in our MongoDB catalog.
+INSTRUCTIONS FOR CATALOG MISS:
+1. Explicitly inform the user that our question catalog currently has no matching ${filterDifficulty ? filterDifficulty + " " : ""}questions for ${detectedCompany} in the database.
+2. DO NOT invent, hallucinate, or fabricate any questions.
+3. Mention popular companies available in the catalog (e.g. Amazon, Google, Meta, Microsoft, Apple, Uber).
+4. Explicitly ask the user whether they would like you to generate a separately labelled, original AI practice problem on this topic for your DSA Arena.
+5. Under NO circumstances call [TOOL_CALL:generate_problem] or silently generate a problem.
+6. Never describe or claim that an AI-generated problem was retrieved from the ${detectedCompany} catalog or is a verified interview question.
+`;
+      } else if (companyMatch) {
+        contextPrompt += `\nCOMPANY MENTION NOTE:
+The user mentioned ${detectedCompany} in conversation. Acknowledge it warmly.
+`;
+      }
     }
 
     const aiResponse = await generateText(contextPrompt);
@@ -1082,12 +1411,53 @@ INSTRUCTIONS:
       }
     }
 
-    // Check for tool call: generate_problem
-    const toolCallMatch = finalAnswer.match(/\[TOOL_CALL:generate_problem\]([\s\S]*?)\[\/TOOL_CALL\]/i);
-    const isExplicitGenRequest =
-      !toolCallMatch &&
-      action === "chat" &&
-      /\b(?:generate|create|give me|load)\s+(?:a|an)?\s*(?:new\s+)?(?:easy|medium|hard)?\s*[\w\s]*?(?:problem|question)\b/i.test(trimmedMessage);
+    // Problem generation is ONLY permitted when this is NOT a company catalog lookup
+    let toolCallMatch = null;
+    let isExplicitGenRequest = false;
+
+    if (!isCompanyCatalogRequest) {
+      toolCallMatch = finalAnswer.match(/\[TOOL_CALL:generate_problem\]([\s\S]*?)\[\/TOOL_CALL\]/i);
+      isExplicitGenRequest =
+        !toolCallMatch &&
+        action === "chat" &&
+        /\b(?:generate|create|give me|load)\s+(?:a|an)?\s*(?:new\s+)?(?:easy|medium|hard)?\s*[\w\s]*?(?:problem|question)\b/i.test(trimmedMessage);
+    } else {
+      // For company catalog requests, suppress and strip any unintended tool calls emitted by AI
+      finalAnswer = finalAnswer.replace(/\[TOOL_CALL:generate_problem\][\s\S]*?\[\/TOOL_CALL\]/i, "").trim();
+
+      // Guardrail: Ensure company retrieval responses are accurate and adhere to catalog contract
+      if (companyQuestionsResult && companyQuestionsResult.questions && companyQuestionsResult.questions.length > 0) {
+        const isSingleQuestionRequest = extractQuestionCount(trimmedMessage) === 1;
+        const requiredQuestions = isSingleQuestionRequest
+          ? companyQuestionsResult.questions.slice(0, 1)
+          : companyQuestionsResult.questions;
+
+        const hasRequiredQuestion = requiredQuestions.some(
+          (q) => finalAnswer.includes(q.title)
+        );
+
+        if (!hasRequiredQuestion || !finalAnswer.trim()) {
+          finalAnswer = formatCatalogQuestionsResponse(
+            detectedCompany,
+            filterDifficulty,
+            companyQuestionsResult,
+            isSingleQuestionRequest
+          );
+        } else {
+          // Normalize any accidental nested bold links or escaped brackets in AI response
+          finalAnswer = finalAnswer
+            .replace(/\*\*\[([^\]]+)\]\(([^)]+)\)\*\*/g, "[$1]($2)")
+            .replace(/\\([\[\]()])/g, "$1");
+        }
+      } else {
+        // Catalog miss: enforce explicit catalog miss message and prompt for separately labelled AI practice problem
+        const hasCatalogMissNotice = /\b(?:no\s+matching|not\s+found|no\s+community\s+tags|no\s+records|catalog\s+has\s+no)\b/i.test(finalAnswer);
+        const asksAiGeneration = /\b(?:ai-generated|practice problem|generate|separately labelled)\b/i.test(finalAnswer);
+        if (!hasCatalogMissNotice || !asksAiGeneration || !finalAnswer.trim()) {
+          finalAnswer = formatCatalogMissResponse(detectedCompany, filterDifficulty, filterTopic);
+        }
+      }
+    }
 
     if (toolCallMatch || isExplicitGenRequest) {
       let targetTopic = "Arrays";
@@ -1109,10 +1479,17 @@ INSTRUCTIONS:
         const diffMatch = trimmedMessage.match(/\b(easy|medium|hard)\b/i);
         if (diffMatch) {
           targetDifficulty = diffMatch[1][0].toUpperCase() + diffMatch[1].slice(1).toLowerCase();
+        } else if (companyQuestionsResult?.questions?.[0]?.difficulty) {
+          targetDifficulty = companyQuestionsResult.questions[0].difficulty;
+        } else {
+          targetDifficulty = adaptiveAssessment?.targetDifficulty || "Medium";
         }
+
         const topicMatch = trimmedMessage.match(/\b(array|arrays|string|strings|dynamic programming|dp|tree|trees|graph|graphs|binary search|hash table|hash map|two pointers|stack|queue|recursion|greedy|heap|linked list)\b/i);
         if (topicMatch) {
           targetTopic = topicMatch[1];
+        } else if (companyQuestionsResult?.questions?.[0]?.topics?.[0]) {
+          targetTopic = companyQuestionsResult.questions[0].topics[0];
         }
       }
 
@@ -1125,16 +1502,25 @@ INSTRUCTIONS:
         // Generate warm confirmation message observing the actual problem created
         const confirmPrompt = `You are Pepe, the DSA Coach.
 The user asked: "${trimmedMessage}".
-You just successfully created and loaded the DSA problem "${result.problem.title}" (${result.difficulty} difficulty, topic: ${result.topic}) into their DSA Arena.
-Give a warm, encouraging 1-2 sentence confirmation to the user stating that the ${result.difficulty} ${result.topic} problem has been loaded into their DSA Arena, and encourage them to try solving it or ask for a hint whenever they need one.
+You just successfully created and loaded an original AI practice problem "${result.problem.title}" (${result.difficulty} difficulty, topic: ${result.topic}) into their DSA Arena.
+Adaptive difficulty context for this choice: "${adaptiveAssessment.reason}".
+CRITICAL RULES:
+1. Clearly identify this as an original AI-generated practice problem.
+2. In 1-2 natural sentences, confirm the problem has been loaded and briefly mention the performance-grounded reason for choosing this ${result.difficulty} difficulty: "${adaptiveAssessment.reason}".
+3. Match user's language (Hindi, Hinglish, or English).
+4. NEVER describe, claim, or imply that this problem was retrieved from a company catalog (e.g. Amazon, Google, etc.).
+5. NEVER claim that this is a verified, official, or actual company interview question.
+6. Encourage them to try solving it or ask for a hint whenever they need one.
 Do not output code or full test cases. Return only the confirmation message.`;
 
         let confirmationAnswer = "";
         try {
           confirmationAnswer = (await generateText(confirmPrompt)).trim();
         } catch {
-          confirmationAnswer = `I've loaded a ${result.difficulty} ${result.topic} problem ("${result.problem.title}") into your DSA Arena. Try solving it, and ask me for a hint whenever you need one!`;
+          confirmationAnswer = `I've generated an original AI practice problem ("${result.problem.title}") [${result.difficulty} • ${result.topic}] and loaded it into your DSA Arena. ${adaptiveAssessment.reason} Try solving it, and ask me for a hint whenever you need one!`;
         }
+
+        confirmationAnswer = sanitizeAiProblemConfirmation(confirmationAnswer, result, detectedCompany);
 
         return res.status(200).json({
           answer: confirmationAnswer,
@@ -1143,6 +1529,13 @@ Do not output code or full test cases. Return only the confirmation message.`;
           topic: result.topic,
           difficulty: result.difficulty,
           onboardingProfile: updatedProfile,
+          adaptiveAssessment: {
+            currentDifficulty: adaptiveAssessment.currentDifficulty,
+            targetDifficulty: result.difficulty,
+            action: adaptiveAssessment.action,
+            reason: adaptiveAssessment.reason,
+            isExplicit: adaptiveAssessment.isExplicit,
+          },
         });
       } catch (err) {
         console.error("Tool execution failed for createDsaProblem:", err);
@@ -1150,6 +1543,13 @@ Do not output code or full test cases. Return only the confirmation message.`;
           answer: `I tried to generate a ${targetDifficulty} ${targetTopic} problem for your DSA Arena, but encountered an error: ${err.message}. Please try asking again.`,
           action: "chat",
           onboardingProfile: updatedProfile,
+          adaptiveAssessment: {
+            currentDifficulty: adaptiveAssessment?.currentDifficulty || "Medium",
+            targetDifficulty: targetDifficulty || "Medium",
+            action: adaptiveAssessment?.action || "maintain",
+            reason: adaptiveAssessment?.reason || "Practicing at standard difficulty.",
+            isExplicit: Boolean(adaptiveAssessment?.isExplicit),
+          },
         });
       }
     }
@@ -1188,13 +1588,22 @@ Do not output code or full test cases. Return only the confirmation message.`;
 
     return res.status(200).json({
       answer: finalAnswer,
+      action: "chat",
       plan: generatedPlan,
       onboardingProfile: updatedProfile,
+      companyQuestions: companyQuestionsResult,
+      adaptiveAssessment: {
+        currentDifficulty: adaptiveAssessment.currentDifficulty,
+        targetDifficulty: adaptiveAssessment.targetDifficulty,
+        action: adaptiveAssessment.action,
+        reason: adaptiveAssessment.reason,
+        isExplicit: adaptiveAssessment.isExplicit,
+      },
     });
   } catch (error) {
     console.error("Error in Pepe coachChat:", error);
     return res.status(500).json({
-      error: error.message || "Failed to get response from Pepe AI Coach.",
+      error: "Failed to process chat message with Pepe AI Coach. Please try again.",
     });
   }
 }
@@ -1226,4 +1635,109 @@ export async function clearCoachData(req, res) {
     });
   }
 }
+
+/**
+ * Endpoint handler for retrieving company-specific DSA questions with ranking and filters.
+ */
+export async function getCompanyQuestionsHandler(req, res) {
+  try {
+    const { company, difficulty, topic, limit } = req.query;
+    if (!company || typeof company !== "string" || !company.trim()) {
+      return res.status(400).json({ error: "Company query parameter is required." });
+    }
+
+    let excludeSlugs = [];
+    if (req.user?.id && mongoose.Types.ObjectId.isValid(req.user.id) && mongoose.connection.readyState === 1) {
+      try {
+        const subs = await DsaSubmission.find({ user: req.user.id })
+          .select("problemId problem.title")
+          .lean();
+        excludeSlugs = subs
+          .map((s) => s.problemId || (s.problem?.title ? s.problem.title.toLowerCase().replace(/\s+/g, "-") : null))
+          .filter(Boolean)
+          .slice(-30);
+      } catch (subErr) {
+        console.warn("Could not fetch user submission slugs:", subErr.message);
+      }
+    }
+
+    const result = await getCompanyQuestions({
+      company: company.trim(),
+      difficulty: difficulty ? String(difficulty).trim() : undefined,
+      topic: topic ? String(topic).trim() : undefined,
+      limit: parseInt(limit, 10) || 10,
+      excludeSlugs,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("Error in getCompanyQuestionsHandler:", error);
+    return res.status(500).json({
+      error: "Failed to fetch company questions from catalog.",
+    });
+  }
+}
+
+/**
+ * Endpoint handler for listing available companies in the catalog.
+ */
+export async function getAvailableCompaniesHandler(req, res) {
+  try {
+    const companies = await getAvailableCompanies();
+    return res.status(200).json({
+      companies,
+      disclaimer: COMPANY_CATALOG_DISCLAIMER,
+    });
+  } catch (error) {
+    console.error("Error in getAvailableCompaniesHandler:", error);
+    return res.status(500).json({
+      error: "Failed to fetch available companies from catalog.",
+    });
+  }
+}
+
+/**
+ * Endpoint handler for inspecting the user's current adaptive difficulty standing.
+ */
+export async function getAdaptiveStatusHandler(req, res) {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        message: "Authentication required. Please sign in.",
+      });
+    }
+
+    const { topic } = req.query;
+    let submissions = [];
+    if (mongoose.connection.readyState === 1) {
+      submissions = await DsaSubmission.find({ user: req.user.id }).sort({ createdAt: -1 });
+    }
+
+    let studyPlanDoc = null;
+    try {
+      studyPlanDoc = await StudyPlan.findOne({ user: req.user.id }).lean();
+    } catch {
+      // Graceful fallback if study plan not yet created
+    }
+
+    const assessment = evaluateAdaptiveDifficulty({
+      submissions,
+      topic: topic || null,
+      userProfile: studyPlanDoc?.onboardingProfile,
+      activePlan: studyPlanDoc?.plan,
+    });
+
+    return res.status(200).json({
+      adaptiveDifficulty: assessment,
+      config: ADAPTIVE_DIFFICULTY_CONFIG,
+    });
+  } catch (error) {
+    console.error("Error in getAdaptiveStatusHandler:", error);
+    return res.status(500).json({
+      error: "Failed to evaluate adaptive difficulty status.",
+    });
+  }
+}
+
+
 

@@ -18,6 +18,21 @@ const dsaSubmissionSchema = new Schema({
         id: String,
         title: String,
         description: String,
+        difficulty: {
+            type: String,
+            enum: ['Easy', 'Medium', 'Hard'],
+            default: 'Medium',
+        },
+    },
+    difficulty: {
+        type: String,
+        enum: ['Easy', 'Medium', 'Hard'],
+        default: 'Medium',
+        index: true,
+    },
+    hintsUsed: {
+        type: Number,
+        default: 0,
     },
     topic: {
         type: String,

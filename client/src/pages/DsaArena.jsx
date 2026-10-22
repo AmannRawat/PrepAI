@@ -98,6 +98,7 @@ const DsaArena = () => {
   const [activeResultsTab, setActiveResultsTab] = useState('tests');
   const [resetSessionCount, setResetSessionCount] = useState(0);
   const [hasGivenUp, setHasGivenUp] = useState(false);
+  const [hintsUsed, setHintsUsed] = useState(0);
 
   const handleGiveUp = useCallback(() => {
     setHasGivenUp(true);
@@ -374,6 +375,7 @@ const DsaArena = () => {
     }
 
     setResetSessionCount((count) => count + 1);
+    setHintsUsed(0);
   }, [language, dsaStorageKey]);
 
   // Load a generated problem (e.g. from Pepe AI Coach tool invocation)
@@ -395,20 +397,29 @@ const DsaArena = () => {
       }
 
       const problemId =
-        newProblem.id || newProblem.problemId || newProblem._id;
+        newProblem?.id ||
+        newProblem?.problemId ||
+        newProblem?._id ||
+        (newProblem?.title
+          ? newProblem.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+          : undefined);
+
+      const targetTopic = newTopic || newProblem.topic || topic;
+      const targetDifficulty = newDifficulty || newProblem.difficulty || difficulty;
       const stableProblem = {
         ...newProblem,
         id: problemId,
         problemId,
+        difficulty: targetDifficulty,
+        topic: targetTopic,
       };
 
-      const targetTopic = newTopic || topic;
-      const targetDifficulty = newDifficulty || difficulty;
       const boilerplate = getBoilerplate(stableProblem, language);
 
       setTopic(targetTopic);
       setDifficulty(targetDifficulty);
       setProblem(stableProblem);
+      setHintsUsed(0);
       setCode(boilerplate);
       setCodeByLanguage({ [language]: boilerplate });
       setRunResults(null);
@@ -751,6 +762,8 @@ const DsaArena = () => {
           code,
           language,
           topic,
+          difficulty: problemPayload.difficulty || difficulty,
+          hintsUsed,
         },
         {
           headers: {
@@ -968,6 +981,7 @@ const DsaArena = () => {
         resetTrigger={resetSessionCount}
         hasGivenUp={hasGivenUp}
         onGiveUp={handleGiveUp}
+        onHintLevelChange={setHintsUsed}
       />
 
       <header className="mb-6 flex-shrink-0">

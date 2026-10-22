@@ -10,6 +10,9 @@ import {
   showSolution,
   coachChat,
   clearCoachData,
+  getCompanyQuestionsHandler,
+  getAvailableCompaniesHandler,
+  getAdaptiveStatusHandler,
 } from "../controllers/dsa.controller.js";
 
 const router = Router();
@@ -25,5 +28,12 @@ router.post("/explain-approach", authMiddleware, explainApproach);
 router.post("/show-solution", authMiddleware, showSolution);
 router.post("/coach-chat", authMiddleware, coachChat);
 router.post("/coach-clear", authMiddleware, clearCoachData);
+
+// Adaptive Difficulty endpoint
+router.get("/adaptive-status", authMiddleware, getAdaptiveStatusHandler);
+
+// Company Questions Catalog endpoints
+router.get("/company-questions", authMiddleware, getCompanyQuestionsHandler);
+router.get("/company-catalog/companies", authMiddleware, getAvailableCompaniesHandler);
 
 export default router;

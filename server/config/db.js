@@ -1,8 +1,9 @@
 import dns from "node:dns";
 import mongoose from "mongoose";
+import { configureMongoDns } from "../utils/dnsConfig.js";
 
 dns.setDefaultResultOrder("ipv4first");
-dns.setServers(["8.8.8.8", "8.8.4.4"]);
+configureMongoDns();
 
 export async function connectDB() {
     try {

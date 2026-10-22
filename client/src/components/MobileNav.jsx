@@ -1,17 +1,29 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Home,
   Code,
   MessageSquare,
   FileText,
   User,
-  LogOut
+  LogOut,
+  LogIn
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useModal } from '../context/ModalContext';
 
 const MobileNav = () => {
-  const { logout } = useAuth();
+  const { logout, isLoggedIn, isLoaded } = useAuth();
+  const { openLogin } = useModal();
+  const navigate = useNavigate();
+
+  const handleLoginClick = () => {
+    if (openLogin) {
+      openLogin();
+    } else {
+      navigate('/login');
+    }
+  };
 
   const getNavLinkClass = ({ isActive }) => {
     return isActive
@@ -47,15 +59,29 @@ const MobileNav = () => {
         <span className="text-[10px] mt-1">Profile</span>
       </NavLink>
 
-      {/* Logout */}
-      <button
-        type="button"
-        onClick={logout}
-        className="flex flex-col items-center justify-center w-full h-full text-text-secondary hover:text-red-400 transition-colors"
-      >
-        <LogOut size={22} />
-        <span className="text-[10px] mt-1">Logout</span>
-      </button>
+      {/* Auth action: Logout if logged in, Login if logged out */}
+      {isLoaded && (
+        isLoggedIn ? (
+          <button
+            type="button"
+            onClick={logout}
+            className="flex flex-col items-center justify-center w-full h-full text-text-secondary hover:text-red-400 transition-colors"
+          >
+            <LogOut size={22} />
+            <span className="text-[10px] mt-1">Logout</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleLoginClick}
+            className="flex flex-col items-center justify-center w-full h-full text-accent hover:text-accent-darker transition-colors"
+            aria-label="Login or Sign in"
+          >
+            <LogIn size={22} />
+            <span className="text-[10px] mt-1">Login</span>
+          </button>
+        )
+      )}
 
     </div>
   );

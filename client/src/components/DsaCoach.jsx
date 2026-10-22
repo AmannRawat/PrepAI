@@ -21,6 +21,7 @@ import {
     Bug,
     Lock,
     LogIn,
+    ExternalLink,
 } from "lucide-react";
 
 const createId = () =>
@@ -282,6 +283,7 @@ function cleanMath(text) {
         .replace(/\\([-*_]{3,})/g, "$1")
         .replace(/\\([|])/g, "$1")
         .replace(/\\([*])/g, "$1")
+        .replace(/\\([\[\]()])/g, "$1")
         .trim();
 }
 
@@ -299,10 +301,32 @@ function MessageContent({ text, typing = false }) {
     };
 
     const renderInline = (line, keyPrefix, showCursor = false) => {
-        const tokens = line.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g);
+        const tokens = line.split(/(\*\*\[[^\]]+\]\([^)]+\)\*\*|\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g);
 
         const result = tokens.map((token, index) => {
             const key = `${keyPrefix}-${index}`;
+
+            const linkMatch = token.match(/^(\*\*)?\[([^\]]+)\]\(([^)]+)\)(\*\*)?$/);
+            if (linkMatch) {
+                const isBold = Boolean(linkMatch[1] && linkMatch[4]);
+                const rawText = linkMatch[2];
+                const href = linkMatch[3];
+                const linkText = rawText.replace(/^\*\*|\*\*$/g, "");
+                return (
+                    <a
+                        key={key}
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`inline-flex items-center gap-1 text-accent hover:underline focus:outline-none focus:ring-1 focus:ring-accent rounded ${
+                            isBold ? "font-semibold" : "font-medium"
+                        }`}
+                    >
+                        <span>{linkText}</span>
+                        <ExternalLink size={12} className="inline shrink-0 opacity-70" />
+                    </a>
+                );
+            }
 
             if (token.startsWith("`") && token.endsWith("`")) {
                 return (
@@ -587,6 +611,7 @@ export default function DsaCoach({
     resetTrigger = 0,
     hasGivenUp: propHasGivenUp = false,
     onGiveUp = null,
+    onHintLevelChange = null,
 }) {
     const { getToken, isLoggedIn, userId } = useAuth();
     const { openLogin } = useModal();
@@ -819,6 +844,7 @@ export default function DsaCoach({
             prevResetTriggerRef.current = resetTrigger;
             setHintHistory([]);
             setHintLevel(0);
+            if (onHintLevelChange) onHintLevelChange(0);
             setHasGivenUp(false);
             setShowGiveUpOptions(false);
             setShowPlan(false);
@@ -1030,24 +1056,48 @@ export default function DsaCoach({
 
                 if (responseAction === "load_problem" && generatedProblem) {
                     if (onLoadProblem) {
-                        const loaded = onLoadProblem(generatedProblem, loadedTopic, loadedDiff);
-                        if (loaded !== false) {
-                            setHintHistory([]);
-                            setHintLevel(0);
-                            setHasGivenUp(false);
-                            setShowGiveUpOptions(false);
+                        try {
+                            const loaded = onLoadProblem(generatedProblem, loadedTopic, loadedDiff);
+                            if (loaded !== false) {
+                                setHintHistory([]);
+                                setHintLevel(0);
+                                if (onHintLevelChange) {
+                                    try {
+                                        onHintLevelChange(0);
+                                    } catch (hintErr) {
+                                        console.warn("onHintLevelChange callback failed:", hintErr);
+                                    }
+                                }
+                                setHasGivenUp(false);
+                                setShowGiveUpOptions(false);
+                            }
+                        } catch (loadErr) {
+                            console.error("Failed to load problem into DSA Arena:", loadErr);
                         }
                     }
                 }
 
                 if (action === "hint") {
                     setHintLevel(nextHintLevel);
+                    if (onHintLevelChange) {
+                        try {
+                            onHintLevelChange(nextHintLevel);
+                        } catch (hintErr) {
+                            console.warn("onHintLevelChange callback failed:", hintErr);
+                        }
+                    }
                     setHintHistory((prev) => [...prev, answer.trim()]);
                 }
 
                 if (action === "solution") {
                     setHasGivenUp(true);
-                    if (onGiveUp) onGiveUp();
+                    if (onGiveUp) {
+                        try {
+                            onGiveUp();
+                        } catch (giveUpErr) {
+                            console.warn("onGiveUp callback failed:", giveUpErr);
+                        }
+                    }
                 }
 
                 setExpression("happy");
@@ -1055,10 +1105,24 @@ export default function DsaCoach({
             } catch (error) {
                 console.error(`DSA Coach ${action} request failed:`, error);
 
-                const message =
-                    error.response?.data?.error ||
-                    error.message ||
-                    "Unable to contact the AI coach. Please try again.";
+                const status = error.response?.status;
+                const providerMessage = [
+                    error.response?.data?.error,
+                    error.message,
+                ].filter(Boolean).join(" ");
+
+                let message;
+
+                if (
+                    status === 503 ||
+                    /high demand|service unavailable|overloaded|temporarily unavailable/i.test(providerMessage)
+                ) {
+                    message =
+                        "The AI service is experiencing high demand right now. Please try again in a moment.";
+                } else {
+                    message =
+                        "Something went wrong while processing your request. Please try again.";
+                }
 
                 addAssistantMessage(`I couldn't complete that request. ${message}`);
             } finally {

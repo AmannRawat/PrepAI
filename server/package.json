@@ -4,7 +4,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "node test-study-plan-analytics.js && node test-resume-reviewer.js",
+    "test": "node test-study-plan-analytics.js && node test-resume-reviewer.js && node test-company-catalog.js && node test-adaptive-difficulty.js",
+    "sync:questions": "node scripts/syncCompanyQuestions.js",
     "dev": "nodemon index.js"
   },
   "keywords": [],
