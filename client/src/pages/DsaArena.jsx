@@ -3,7 +3,6 @@ import axios from 'axios';
 
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
-import { okaidia } from '@uiw/codemirror-theme-okaidia';
 import { javascript } from '@codemirror/lang-javascript';
 import { cpp } from '@codemirror/lang-cpp';
 import { java } from '@codemirror/lang-java';
@@ -23,6 +22,7 @@ import {
   Send,
   Clock,
   Terminal,
+  RotateCcw,
 } from 'lucide-react';
 import DsaCoach from '../components/DsaCoach';
 
@@ -96,6 +96,12 @@ const DsaArena = () => {
   const [executionResults, setExecutionResults] = useState(null);
   const [selectedTestCaseIndex, setSelectedTestCaseIndex] = useState(0);
   const [activeResultsTab, setActiveResultsTab] = useState('tests');
+  const [resetSessionCount, setResetSessionCount] = useState(0);
+  const [hasGivenUp, setHasGivenUp] = useState(false);
+
+  const handleGiveUp = useCallback(() => {
+    setHasGivenUp(true);
+  }, []);
 
   const dsaStorageKey = userId ? `prepai:${userId}:dsa` : null;
 
@@ -338,8 +344,130 @@ const DsaArena = () => {
     });
   }, [problem, language, dsaStorageKey, saveDsaState]);
 
+  // Reset current session: completely clears the active problem, returns arena to empty state,
+  // resets editor code to default boilerplate, clears results/errors, and clears persisted session.
+  const handleResetSession = useCallback(() => {
+    setEvaluationError(null);
+    setRunResults(null);
+    setExecutionResults(null);
+    setFeedback(null);
+    setActiveResultsTab('tests');
+    setSelectedTestCaseIndex(0);
+    setHasGivenUp(false);
+    setProblem(null);
+
+    const defaultCode = DEFAULT_BOILERPLATES[language] || DEFAULT_BOILERPLATES.javascript;
+    setCode(defaultCode);
+    setCodeByLanguage({});
+
+    initializedProblemRef.current = {
+      problemKey: null,
+      language: null,
+    };
+
+    if (dsaStorageKey) {
+      try {
+        localStorage.removeItem(dsaStorageKey);
+      } catch (err) {
+        console.error('Failed to remove DSA state on reset:', err);
+      }
+    }
+
+    setResetSessionCount((count) => count + 1);
+  }, [language, dsaStorageKey]);
+
+  // Load a generated problem (e.g. from Pepe AI Coach tool invocation)
+  const handleLoadProblem = useCallback(
+    (newProblem, newTopic, newDifficulty) => {
+      if (!newProblem) return false;
+
+      // Warn / confirm if user has unsaved code modifications
+      if (problem && code) {
+        const currentBoilerplate = getBoilerplate(problem, language);
+        if (code.trim() !== currentBoilerplate.trim()) {
+          const proceed = window.confirm(
+            'You have modified code for the current problem. Loading a new problem will reset your editor. Do you want to proceed?'
+          );
+          if (!proceed) {
+            return false;
+          }
+        }
+      }
+
+      const problemId =
+        newProblem.id || newProblem.problemId || newProblem._id;
+      const stableProblem = {
+        ...newProblem,
+        id: problemId,
+        problemId,
+      };
+
+      const targetTopic = newTopic || topic;
+      const targetDifficulty = newDifficulty || difficulty;
+      const boilerplate = getBoilerplate(stableProblem, language);
+
+      setTopic(targetTopic);
+      setDifficulty(targetDifficulty);
+      setProblem(stableProblem);
+      setCode(boilerplate);
+      setCodeByLanguage({ [language]: boilerplate });
+      setRunResults(null);
+      setExecutionResults(null);
+      setEvaluationError(null);
+      setFeedback(null);
+      setActiveResultsTab('tests');
+      setSelectedTestCaseIndex(0);
+      setHasGivenUp(false);
+
+      initializedProblemRef.current = {
+        problemKey: problemId || stableProblem.title,
+        language,
+      };
+
+      saveDsaState({
+        problem: stableProblem,
+        code: boilerplate,
+        codeByLanguage: { [language]: boilerplate },
+        language,
+        topic: targetTopic,
+        difficulty: targetDifficulty,
+        feedback: null,
+        runResults: null,
+        executionResults: null,
+        evaluationError: null,
+      });
+
+      return true;
+    },
+    [problem, code, language, topic, difficulty, saveDsaState]
+  );
+
+  // Clear all saved coach and DSA data
+  const handleClearAllCoachData = useCallback(() => {
+    if (dsaStorageKey) {
+      localStorage.removeItem(dsaStorageKey);
+    }
+    setProblem(null);
+    setCode('');
+    setCodeByLanguage({});
+    setRunResults(null);
+    setExecutionResults(null);
+    setEvaluationError(null);
+    setFeedback(null);
+    setError(null);
+    setActiveResultsTab('tests');
+    setSelectedTestCaseIndex(0);
+    setHasGivenUp(false);
+    initializedProblemRef.current = { problemKey: null, language: null };
+  }, [dsaStorageKey]);
+
   // Generate a new problem.
   const generateProblem = async () => {
+    if (!isLoggedIn) {
+      openLogin();
+      return;
+    }
+
     setError(null);
     setIsLoading(true);
     setProblem(null);
@@ -349,7 +477,9 @@ const DsaArena = () => {
     setRunResults(null);
     setExecutionResults(null);
     setEvaluationError(null);
+    setActiveResultsTab('tests');
     setSelectedTestCaseIndex(0);
+    setHasGivenUp(false);
     initializedProblemRef.current = { problemKey: null, language: null };
 
     if (dsaStorageKey) {
@@ -825,7 +955,20 @@ const DsaArena = () => {
 
   return (
     <div className="flex flex-col flex-1 h-full">
-      <DsaCoach activeProblem={problem} code={code} language={language} />
+      <DsaCoach
+        activeProblem={problem}
+        code={code}
+        language={language}
+        runResults={runResults}
+        executionResults={executionResults}
+        evaluationError={evaluationError}
+        onResetSession={handleResetSession}
+        onClearAllCoachData={handleClearAllCoachData}
+        onLoadProblem={handleLoadProblem}
+        resetTrigger={resetSessionCount}
+        hasGivenUp={hasGivenUp}
+        onGiveUp={handleGiveUp}
+      />
 
       <header className="mb-6 flex-shrink-0">
         <h1 className="text-3xl font-bold text-text-primary">DSA Arena</h1>
@@ -1073,42 +1216,70 @@ const DsaArena = () => {
               />
             </div>
 
-            <div className="p-3 bg-background border-t border-text-secondary/20 flex items-center justify-end gap-3">
-              <button
-                onClick={handleRunCode}
-                disabled={isRunningCode || isEvaluating || !problem}
-                className="border border-accent text-accent font-semibold py-2 px-4 rounded-lg hover:bg-accent/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {isRunningCode ? (
-                  <>
-                    <span className="inline-block w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-                    <span>Running...</span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4" />
-                    <span>Run Code</span>
-                  </>
-                )}
-              </button>
+            <div className="p-3 bg-background border-t border-text-secondary/20 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetSession}
+                  disabled={isRunningCode || isEvaluating || (!problem && !code)}
+                  title="Reset session and return Arena to clean state"
+                  className="text-text-secondary hover:text-text-primary text-xs flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-text-secondary/20 hover:bg-text-secondary/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Session</span>
+                </button>
 
-              <button
-                onClick={handleCodeSubmission}
-                disabled={isEvaluating || isRunningCode || !problem}
-                className="bg-accent text-white font-bold py-2 px-4 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {isEvaluating ? (
-                  <>
-                    <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Evaluating...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    <span>Submit Code</span>
-                  </>
+                {problem && !hasGivenUp && (
+                  <button
+                    type="button"
+                    onClick={handleGiveUp}
+                    disabled={isRunningCode || isEvaluating}
+                    title="Give up on the current problem and reveal approach & solution"
+                    className="text-text-secondary hover:text-amber-400 text-xs flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-text-secondary/20 hover:bg-amber-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Give Up</span>
+                  </button>
                 )}
-              </button>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleRunCode}
+                  disabled={isRunningCode || isEvaluating || !problem}
+                  className="border border-accent text-accent font-semibold py-2 px-4 rounded-lg hover:bg-accent/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isRunningCode ? (
+                    <>
+                      <span className="inline-block w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                      <span>Running...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-4 h-4" />
+                      <span>Run Code</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={handleCodeSubmission}
+                  disabled={isEvaluating || isRunningCode || !problem}
+                  className="bg-accent text-white font-bold py-2 px-4 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isEvaluating ? (
+                    <>
+                      <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Evaluating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>Submit Code</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 

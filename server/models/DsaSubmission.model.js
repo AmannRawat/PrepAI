@@ -9,7 +9,13 @@ const dsaSubmissionSchema = new Schema({
         required: true
     },
     // The problem the user was given
+    problemId: {
+        type: String,
+        default: null,
+        index: true,
+    },
     problem: {
+        id: String,
         title: String,
         description: String,
     },

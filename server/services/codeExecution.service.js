@@ -132,7 +132,7 @@ ${code}
  */
 function buildPythonHarness(code, testCases) {
     const match = code.match(
-        /\bdef\s+([A-Za-z_]\w*)\s*\(([^)]*)\):/
+        /\bdef\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?:->\s*[^:]+)?\s*:/
     );
 
     if (!match) {
@@ -178,16 +178,19 @@ def __prepai_runner():
     for i, test in enumerate(__tests):
         try:
             inp = test.get("input", {})
-            inp_keys = list(inp.keys()) if isinstance(inp, dict) else []
-            args = []
-            for idx, p in enumerate(__param_names):
-                if isinstance(inp, dict) and p in inp:
-                    val = inp[p]
-                elif idx < len(inp_keys):
-                    val = inp[inp_keys[idx]]
-                else:
-                    val = None
-                args.append(copy.deepcopy(val))
+            if isinstance(inp, list):
+                args = [copy.deepcopy(inp[idx]) if idx < len(inp) else None for idx in range(len(__param_names))]
+            else:
+                inp_keys = list(inp.keys()) if isinstance(inp, dict) else []
+                args = []
+                for idx, p in enumerate(__param_names):
+                    if isinstance(inp, dict) and p in inp:
+                        val = inp[p]
+                    elif idx < len(inp_keys):
+                        val = inp[inp_keys[idx]]
+                    else:
+                        val = None
+                    args.append(copy.deepcopy(val))
 
             actual = __solution(*args)
             __results.append({

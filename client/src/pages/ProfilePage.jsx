@@ -6,7 +6,7 @@ import { useModal } from '../context/ModalContext';
 
 import axios from 'axios';
 
-import { Loader2, Lock, LogIn, TrendingUp, FileText, MessageSquare } from 'lucide-react'; // For loading spinner
+import { Loader2, Lock, LogIn, TrendingUp, FileText, MessageSquare, Target, CheckCircle2, Award, Flame } from 'lucide-react'; // For icons
 
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
@@ -25,6 +25,7 @@ const ProfilePage = () => {
   const { openLogin } = useModal();
 
   const [progress, setProgress] = useState(null);
+  const [dsaStats, setDsaStats] = useState(null);
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -153,14 +154,34 @@ const ProfilePage = () => {
           return;
         }
 
-        // Fetch data from our new protected endpoint
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/user/progress`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        // Fetch progress and comprehensive DSA stats
+        const [progressRes, statsRes] = await Promise.allSettled([
+          axios.get(`${import.meta.env.VITE_API_URL}/api/user/progress`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          }),
+          axios.get(`${import.meta.env.VITE_API_URL}/api/user/dsa-stats`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          })
+        ]);
 
-        setProgress(response.data); // Save the { resumeReviews, chatSessions, dataSubmision } object
+        if (progressRes.status === 'fulfilled' && progressRes.value.data) {
+          setProgress(progressRes.value.data);
+          if (progressRes.value.data.dsaStats) {
+            setDsaStats(progressRes.value.data.dsaStats);
+          }
+        }
+
+        if (statsRes.status === 'fulfilled' && statsRes.value.data) {
+          setDsaStats(statsRes.value.data);
+        }
+
+        if (progressRes.status === 'rejected' && statsRes.status === 'rejected') {
+          throw new Error("Failed to load progress or stats.");
+        }
 
       } catch (err) {
 
@@ -183,6 +204,14 @@ const ProfilePage = () => {
   // --- DATA PROCESSING ---
 
   const dsaTopicData = useMemo(() => {
+    if (dsaStats?.topicBreakdown && dsaStats.topicBreakdown.length > 0) {
+      return dsaStats.topicBreakdown.map((t) => ({
+        name: t.topic,
+        value: t.attempts,
+        solved: t.uniqueSolved,
+        acceptanceRate: t.acceptanceRate,
+      }));
+    }
 
     if (!progress || !progress.dsaSubmissions) return [];
 
@@ -201,7 +230,7 @@ const ProfilePage = () => {
       value: topicCounts[key]
     }));
 
-  }, [progress]);
+  }, [dsaStats, progress]);
 
 
   const resumeScoreData = useMemo(() => {
@@ -368,6 +397,56 @@ const ProfilePage = () => {
         {!isLoading && !error && progress && (
 
           <>
+            {/* High-Level DSA & Interview Stats Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-surface/70 p-4 rounded-xl border border-text-secondary/10 flex items-center gap-3">
+                <div className="p-2.5 rounded-lg bg-blue-500/10 text-blue-400">
+                  <Target size={20} />
+                </div>
+                <div>
+                  <p className="text-xs text-text-secondary">Total Attempts</p>
+                  <p className="text-xl font-bold text-text-primary">
+                    {dsaStats?.totalAttempts ?? progress.dsaSubmissions?.length ?? 0}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-surface/70 p-4 rounded-xl border border-text-secondary/10 flex items-center gap-3">
+                <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-400">
+                  <CheckCircle2 size={20} />
+                </div>
+                <div>
+                  <p className="text-xs text-text-secondary">Unique Solved</p>
+                  <p className="text-xl font-bold text-text-primary">
+                    {dsaStats?.uniqueSolved ?? 0}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-surface/70 p-4 rounded-xl border border-text-secondary/10 flex items-center gap-3">
+                <div className="p-2.5 rounded-lg bg-purple-500/10 text-purple-400">
+                  <Award size={20} />
+                </div>
+                <div>
+                  <p className="text-xs text-text-secondary">Acceptance Rate</p>
+                  <p className="text-xl font-bold text-text-primary">
+                    {dsaStats ? `${dsaStats.acceptanceRate}%` : "0%"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-surface/70 p-4 rounded-xl border border-text-secondary/10 flex items-center gap-3">
+                <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-400">
+                  <Flame size={20} />
+                </div>
+                <div>
+                  <p className="text-xs text-text-secondary">Current Streak</p>
+                  <p className="text-xl font-bold text-text-primary">
+                    {progress.currentStreak ?? 0} {progress.currentStreak === 1 ? "day" : "days"}
+                  </p>
+                </div>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
@@ -435,50 +514,60 @@ const ProfilePage = () => {
                 Recent DSA Submissions
               </h2>
 
-              {progress.dsaSubmissions && progress.dsaSubmissions.length > 0 ? (
+              {(dsaStats?.recentSubmissions || progress.dsaSubmissions)?.length > 0 ? (
 
                 <ul className="space-y-3">
 
-                  {progress.dsaSubmissions.map((sub) => (
+                  {(dsaStats?.recentSubmissions || progress.dsaSubmissions).map((sub) => {
+                    const isAccepted = sub.verdict === 'Accepted';
+                    const isKnownFailure = sub.verdict && sub.verdict !== 'Accepted';
+                    const badgeText = sub.verdict || (
+                      sub.feedback?.correctness?.toLowerCase().includes('correct') &&
+                      !sub.feedback?.correctness?.toLowerCase().includes('incorrect')
+                        ? 'Solved'
+                        : 'Review Needed'
+                    );
+                    const badgeColor = isAccepted
+                      ? 'text-green-400 border-green-400/30 bg-green-400/10'
+                      : isKnownFailure
+                        ? 'text-red-400 border-red-400/30 bg-red-400/10'
+                        : (
+                          sub.feedback?.correctness?.toLowerCase().includes('correct') &&
+                          !sub.feedback?.correctness?.toLowerCase().includes('incorrect')
+                            ? 'text-green-400 border-green-400/30 bg-green-400/10'
+                            : 'text-red-400 border-red-400/30 bg-red-400/10'
+                        );
 
-                    <li
-                      key={sub._id}
-                      className="p-4 bg-background/50 rounded-md border border-text-secondary/20 flex justify-between items-center"
-                    >
-
-                      <div>
-
-                        <p className="font-semibold text-text-primary">
-                          {sub.problem?.title || 'DSA Problem'}
-                        </p>
-
-                        <p className="text-xs text-text-secondary mt-1">
-                          {formatDate(sub.createdAt)}
-                        </p>
-
-                      </div>
-
-                      <div
-                        className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                          (
-                            sub.feedback?.correctness?.toLowerCase().includes('incorrect') ||
-                            sub.feedback?.correctness?.toLowerCase().includes('error')
-                          )
-                            ? 'text-red-400 border-red-400/30 bg-red-400/10'
-                            : 'text-green-400 border-green-400/30 bg-green-400/10'
-                        }`}
+                    return (
+                      <li
+                        key={sub._id}
+                        className="p-4 bg-background/50 rounded-md border border-text-secondary/20 flex justify-between items-center"
                       >
 
-                        {sub.feedback?.correctness?.toLowerCase().includes('correct') &&
-                        !sub.feedback?.correctness?.toLowerCase().includes('incorrect')
-                          ? 'Solved'
-                          : 'Review Needed'}
+                        <div>
 
-                      </div>
+                          <p className="font-semibold text-text-primary">
+                            {sub.problem?.title || 'DSA Problem'}
+                          </p>
 
-                    </li>
+                          <p className="text-xs text-text-secondary mt-1">
+                            {formatDate(sub.createdAt)} • {sub.topic || 'General'}
+                            {typeof sub.passed === 'number' && typeof sub.total === 'number' && sub.total > 0
+                              ? ` • ${sub.passed}/${sub.total} tests passed`
+                              : ''}
+                          </p>
 
-                  ))}
+                        </div>
+
+                        <div
+                          className={`px-3 py-1 rounded-full text-xs font-bold border ${badgeColor}`}
+                        >
+                          {badgeText}
+                        </div>
+
+                      </li>
+                    );
+                  })}
 
                 </ul>
 

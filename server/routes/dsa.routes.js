@@ -8,11 +8,13 @@ import {
   getHint,
   explainApproach,
   showSolution,
+  coachChat,
+  clearCoachData,
 } from "../controllers/dsa.controller.js";
 
 const router = Router();
 
-router.post("/generate-problem", generateProblem);
+router.post("/generate-problem", authMiddleware, generateProblem);
 
 router.post("/run-code", authMiddleware, runCode);
 router.post("/evaluate-code", authMiddleware, evaluateCode);
@@ -21,5 +23,7 @@ router.post("/evaluate-code", authMiddleware, evaluateCode);
 router.post("/hint", authMiddleware, getHint);
 router.post("/explain-approach", authMiddleware, explainApproach);
 router.post("/show-solution", authMiddleware, showSolution);
+router.post("/coach-chat", authMiddleware, coachChat);
+router.post("/coach-clear", authMiddleware, clearCoachData);
 
 export default router;

@@ -9,81 +9,230 @@ import { extractJson } from "../utils/extractJson.js";
 
 export async function reviewResume(req, res) {
     try {
-        // Check if a file was actually uploaded
-        if (!req.file) {
-            return res.status(400).json({
-                error: "No resume file uploaded.",
+        // Enforce authentication
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({
+                message: "Authentication required. Please sign in.",
             });
         }
 
-        // Get user ID from auth middleware
         const userId = req.user.id;
 
-        // Send PDF to FastAPI → chunk → embed → Qdrant
-        const ragResult = await uploadResume(req.file);
+        // Check if a file was uploaded
+        if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
+            return res.status(400).json({
+                error: "No resume file uploaded. Please upload a PDF resume.",
+            });
+        }
 
-        console.log("RAG indexing result:", ragResult);
+        // Validate and sanitize the job description
+        const jobDescription = String(req.body.jobDescription || "").trim();
+        if (!jobDescription || jobDescription.length < 20) {
+            return res.status(400).json({
+                error: "Please provide a job description (at least 20 characters) for the role you are targeting.",
+            });
+        }
 
-        // Store Qdrant document ID against the user
-        await User.findByIdAndUpdate(
-            userId,
-            {
-                resumeDocumentId: ragResult.document_id,
+        const jobTitle = String(req.body.jobTitle || "").trim();
+        const sanitizedJobDescription = jobDescription.slice(0, 12000);
+
+        // Extract text from PDF buffer safely
+        let resumeText = "";
+        try {
+            const parser = new PDFParse({
+                data: req.file.buffer,
+            });
+            const result = await parser.getText();
+            resumeText = (result.text || "").trim();
+            await parser.destroy();
+        } catch (pdfError) {
+            console.warn("PDF extraction error:", pdfError.message);
+            return res.status(400).json({
+                error: "Could not read the PDF file. Please ensure it is a valid, unencrypted PDF containing selectable text.",
+            });
+        }
+
+        if (!resumeText || resumeText.length < 50) {
+            return res.status(400).json({
+                error: "No readable text was found in the uploaded resume. If your resume is an image or scan, please convert it to selectable text before uploading.",
+            });
+        }
+
+        const sanitizedResumeText = resumeText.slice(0, 20000);
+
+        // Optional RAG indexing: index document if AI service is online, but do not block review if offline
+        let documentId = null;
+        try {
+            const ragResult = await uploadResume(req.file);
+            documentId = ragResult?.document_id || null;
+            if (documentId) {
+                await User.findByIdAndUpdate(userId, {
+                    resumeDocumentId: documentId,
+                });
             }
-        );
+        } catch (ragError) {
+            console.warn("RAG indexing skipped/unavailable:", ragError.message);
+        }
 
-        console.log(`Reviewing resume for user: ${userId}`);
-
-        // Extract text from PDF buffer for ATS review
-        const parser = new PDFParse({
-            data: req.file.buffer,
-        });
-
-        const result = await parser.getText();
-        const resumeText = result.text;
-
-        await parser.destroy();
-
-        // Original ATS prompt
+        // Prompt for Job-Description-Based ATS Scoring & Gap Analysis
         const prompt = `
-            You are an expert career coach specializing in software engineering resumes.
-            Analyze the following resume text and provide constructive feedback as a clean, raw JSON object.
+You are an expert technical recruiter, hiring manager, and ATS (Applicant Tracking System) specialist.
+Perform a thorough, objective, and evidence-grounded ATS analysis of the candidate's resume strictly against the target job description.
 
-            **VALIDATION STEP:**
-            - If the text looks like an academic assignment, homework, essay, research paper, or random gibberish, return ONLY this JSON:
+**VALIDATION STEP:**
+- If the resume text does NOT look like a resume (e.g., it is homework, an essay, research paper, terms of service, or gibberish), return ONLY this JSON:
+  { "error": "The uploaded file does not appear to be a resume. Please upload a valid software engineering or professional resume." }
 
-              { "error": "The uploaded file does not appear to be a resume. It looks like an assignment or document." }
+**ANALYSIS GUIDELINES & INTEGRITY RULES:**
+1. ATS MATCH SCORE (0-100):
+   Calculate an estimated match score out of 100 with clear subscore weights:
+   - Relevant Skills match: 0-25
+   - Required Qualifications match: 0-25
+   - Relevant Experience match: 0-20
+   - Keywords & Domain Terminology match: 0-15
+   - Resume Structure, Readability & Formatting: 0-15
+   The total estimatedScore must equal the sum of these subscores.
+   Provide an explicit methodology explanation.
+   State the limitations: This score is PrepAI's algorithmic estimate based on hiring criteria and keyword alignment; it is not an employer's proprietary ATS score (e.g. Workday, Greenhouse, Lever). Proprietary systems index and rank for human reviewers rather than applying a universal reject score.
 
-            - ONLY if it is a valid resume, proceed with the analysis below
+2. EVIDENCE-BASED GAP ANALYSIS:
+   Distinguish REQUIRED qualifications (must-haves) from PREFERRED qualifications (nice-to-haves, bonuses).
+   For each requirement:
+   - Identify whether it is Supported, Weakly Evidenced, or Missing.
+   - For supported/weak items: cite the exact quote or specific evidence from the resume.
+   - For missing items: state that it was present in the Job Description but absent from the Resume text.
+   - CRITICAL: Add a clear note clarifying that absence from the resume text does NOT imply the candidate lacks personal ability in reality; if they have the experience, they should incorporate it truthfully.
 
-            **RESUME ANALYSIS:**
-            The JSON object must have this exact structure:
+3. SPECIFIC BULLET-POINT REWRITES:
+   Identify 3 to 5 actual bullet points from the candidate's resume that could be rewritten for better alignment with this job description.
+   For each bullet:
+   - original: The exact original bullet from the candidate's resume.
+   - improved: A concrete rewrite grounded strictly in the candidate's real experience and projects.
+   - rationale: Why this rewrite improves alignment with the target job (e.g., highlights key technologies, uses active engineering verbs).
+   - keywordsAdded: An array of 1-3 relevant keywords naturally and truthfully woven into the rewrite.
+   - clarificationNeeded: If specific metrics, scale, or outcomes are missing, prompt the candidate to verify and insert their actual metrics. NEVER fabricate numbers, dates, fake employers, or false achievements.
 
-            {
-              "atsAssessment": {
-                 "estimatedScore": "Provide an estimated ATS compatibility score out of 100 (e.g., 75). Base this score on factors like keyword relevance (common software engineering terms), clear structure, standard formatting, and the absence of elements that confuse ATS (like tables or complex graphics).",
+4. PRIORITIZED ACTION PLAN:
+   Group recommendations into three distinct priority tiers:
+   - High Priority: Major missing required qualifications, core technical stack mismatches, or critical structural issues.
+   - Medium Priority: Weakly evidenced achievements, passive bullet phrasing, or unhighlighted secondary skills.
+   - Low Priority: Formatting, standard section headers, minor phrasing polish, or typography.
+   For every action item, provide:
+   - action: Short title
+   - detail: Specific recommendation
+   - expectedBenefit: Realistic expected benefit (e.g., "Improves keyword indexing for backend recruiter queries"). Never promise guaranteed ATS bypass or guaranteed interview offers.
 
-                 "explanation": "Briefly explain the score, mentioning specific strengths or weaknesses related to ATS readability. Suggest one key improvement."
-              },
+5. BACKWARD-COMPATIBLE SUMMARY FIELDS:
+   - strengths: Array of 3-4 top strengths for this specific job match.
+   - areasForImprovement: Array of 3-4 main areas to improve.
+   - actionVerbSuggestions: Text summary of 3 strong verbs used and 3 suggested replacements for weak verbs found.
+   - quantificationSuggestions: Text summary of 2 specific places where adding measurable metrics would show greater impact.
 
-              "strengths": "List 2-3 key strengths of the resume (e.g., strong projects, relevant skills). Be specific.",
+**TARGET JOB ROLE:** ${jobTitle || "Software Engineer"}
 
-              "areasForImprovement": "Identify 2-3 major areas that need significant improvement (e.g., lack of quantification, weak action verbs, unclear objective).",
+**TARGET JOB DESCRIPTION:**
+${sanitizedJobDescription}
 
-              "actionVerbSuggestions": "Analyze action verbs. Respond as a plain text string. List 3 strong verbs used. Then, list 3 weaker phrases found and suggest a stronger alternative for each (e.g., 'Instead of 'Built', try 'Engineered'.').",
+**CANDIDATE'S RESUME TEXT:**
+${sanitizedResumeText}
 
-              "quantificationSuggestions": "Analyze quantifiable results. Respond as a plain text string. Point out 2 examples where adding numbers/data would show more impact. Format suggestions clearly (e.g., 'Original: [phrase]. Suggestion: [phrase with numbers].')."
-            }
-
-            --- RESUME TEXT TO ANALYZE ---
-
-            ${resumeText}
-
-            ---
-        `;
+**OUTPUT FORMAT:**
+Return ONLY one valid JSON object. No markdown code blocks, no backticks, no text before or after the JSON.
+Follow this schema exactly:
+{
+  "atsAssessment": {
+    "estimatedScore": 75,
+    "explanation": "Summary explanation of the overall score and alignment with the target job.",
+    "breakdown": {
+      "skillsScore": 20,
+      "skillsMax": 25,
+      "qualificationsScore": 18,
+      "qualificationsMax": 25,
+      "experienceScore": 15,
+      "experienceMax": 20,
+      "keywordsScore": 11,
+      "keywordsMax": 15,
+      "structureScore": 11,
+      "structureMax": 15
+    },
+    "methodology": "Score is calculated as a weighted composite across relevant technical skills (25%), required qualifications (25%), relevant project/work experience (20%), ATS keyword match (15%), and resume structure/readability (15%).",
+    "limitationsDisclaimer": "This score is PrepAI's algorithmic estimate based on industry hiring criteria and keyword alignment. It is not an employer's proprietary ATS score (e.g. Workday, Greenhouse, Lever). Proprietary systems index and rank for human reviewers rather than applying a universal reject score."
+  },
+  "qualificationsAnalysis": {
+    "required": [
+      {
+        "requirement": "Requirement title from JD",
+        "status": "supported | weak | missing",
+        "evidence": "Exact quote or specific resume evidence if supported/weak, or 'Not detected in resume text' if missing",
+        "source": "Job Description"
+      }
+    ],
+    "preferred": [
+      {
+        "requirement": "Preferred qualification from JD",
+        "status": "supported | weak | missing",
+        "evidence": "Evidence or explanation",
+        "source": "Job Description"
+      }
+    ]
+  },
+  "gapAnalysis": [
+    {
+      "requirement": "Requirement name",
+      "source": "Job Description",
+      "status": "supported | weak | missing",
+      "evidence": "Resume evidence or absence explanation",
+      "notes": "Actionable insight. If missing from resume, emphasize that omission from text does not mean the user lacks the skill in reality."
+    }
+  ],
+  "bulletImprovements": [
+    {
+      "original": "Original bullet from resume",
+      "improved": "Concrete rewrite grounded in candidate's experience",
+      "rationale": "Why this improves alignment",
+      "keywordsAdded": ["Keyword1", "Keyword2"],
+      "clarificationNeeded": "Prompt for user verification of metrics if missing"
+    }
+  ],
+  "prioritizedActionPlan": {
+    "highPriority": [
+      {
+        "action": "Action title",
+        "detail": "Action detail",
+        "expectedBenefit": "Expected impact"
+      }
+    ],
+    "mediumPriority": [
+      {
+        "action": "Action title",
+        "detail": "Action detail",
+        "expectedBenefit": "Expected impact"
+      }
+    ],
+    "lowPriority": [
+      {
+        "action": "Action title",
+        "detail": "Action detail",
+        "expectedBenefit": "Expected impact"
+      }
+    ]
+  },
+  "strengths": [
+    "Key strength 1",
+    "Key strength 2",
+    "Key strength 3"
+  ],
+  "areasForImprovement": [
+    "Area 1",
+    "Area 2",
+    "Area 3"
+  ],
+  "actionVerbSuggestions": "3 strong verbs used and 3 replacements for weaker phrases.",
+  "quantificationSuggestions": "2 places where adding numbers/metrics would show more impact."
+}
+`;
 
         const responseText = await generateText(prompt);
-
         const parsedResponse = extractJson(responseText);
 
         if (parsedResponse.error) {
@@ -92,27 +241,86 @@ export async function reviewResume(req, res) {
             });
         }
 
-        // Save resume review
-        const newReview = new ResumeReview({
-            user: userId,
-            resumeText: resumeText,
-            documentId: ragResult.document_id,
-            atsAssessment: parsedResponse.atsAssessment,
-            strengths: parsedResponse.strengths,
-            areasForImprovement: parsedResponse.areasForImprovement,
-            actionVerbSuggestions: parsedResponse.actionVerbSuggestions,
-            quantificationSuggestions: parsedResponse.quantificationSuggestions,
-        });
+        // Normalize estimatedScore to ensure consistency
+        let finalScore = 0;
+        if (parsedResponse.atsAssessment?.breakdown) {
+            const b = parsedResponse.atsAssessment.breakdown;
+            const calculatedSum =
+                (Number(b.skillsScore) || 0) +
+                (Number(b.qualificationsScore) || 0) +
+                (Number(b.experienceScore) || 0) +
+                (Number(b.keywordsScore) || 0) +
+                (Number(b.structureScore) || 0);
+            finalScore = Math.max(0, Math.min(100, Math.round(calculatedSum)));
+            parsedResponse.atsAssessment.estimatedScore = String(finalScore);
+        } else {
+            finalScore = Math.max(0, Math.min(100, Math.round(Number(parsedResponse.atsAssessment?.estimatedScore) || 50)));
+            parsedResponse.atsAssessment.estimatedScore = String(finalScore);
+        }
 
-        await newReview.save();
+        // Ensure array structures exist
+        if (!Array.isArray(parsedResponse.strengths)) {
+            parsedResponse.strengths = parsedResponse.strengths ? [String(parsedResponse.strengths)] : [];
+        }
+        if (!Array.isArray(parsedResponse.areasForImprovement)) {
+            parsedResponse.areasForImprovement = parsedResponse.areasForImprovement ? [String(parsedResponse.areasForImprovement)] : [];
+        }
 
-        res.status(200).json(parsedResponse);
+        // Save resume review to database
+        try {
+            const newReview = new ResumeReview({
+                user: userId,
+                documentId: documentId,
+                jobTitle: jobTitle || "Target Role",
+                jobDescription: sanitizedJobDescription,
+                atsAssessment: parsedResponse.atsAssessment,
+                qualificationsAnalysis: parsedResponse.qualificationsAnalysis || { required: [], preferred: [] },
+                gapAnalysis: parsedResponse.gapAnalysis || [],
+                bulletImprovements: parsedResponse.bulletImprovements || [],
+                prioritizedActionPlan: parsedResponse.prioritizedActionPlan || { highPriority: [], mediumPriority: [], lowPriority: [] },
+                strengths: parsedResponse.strengths,
+                areasForImprovement: parsedResponse.areasForImprovement,
+                actionVerbSuggestions: parsedResponse.actionVerbSuggestions || "",
+                quantificationSuggestions: parsedResponse.quantificationSuggestions || "",
+            });
 
+            await newReview.save();
+        } catch (dbError) {
+            console.error("Error saving ResumeReview to database:", dbError.message);
+        }
+
+        return res.status(200).json(parsedResponse);
     } catch (error) {
-        console.error("Error reviewing resume:", error);
+        console.error("Error reviewing resume:", error.message);
+        return res.status(500).json({
+            error: "Failed to review resume against job description. Please try again.",
+        });
+    }
+}
 
-        res.status(500).json({
-            error: "Failed to review resume. Please try again.",
+/**
+ * Retrieves the latest saved resume review for the authenticated user.
+ */
+export async function getLatestResumeReview(req, res) {
+    try {
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({
+                message: "Authentication required. Please sign in.",
+            });
+        }
+
+        const latestReview = await ResumeReview.findOne({ user: req.user.id })
+            .sort({ createdAt: -1 });
+
+        if (!latestReview) {
+            return res.status(200).json({ review: null });
+        }
+
+        return res.status(200).json({ review: latestReview });
+    } catch (error) {
+        console.error("Error retrieving latest resume review:", error);
+        return res.status(500).json({
+            error: "Failed to retrieve resume review.",
         });
     }
 }

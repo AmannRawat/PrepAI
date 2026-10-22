@@ -1,4 +1,8 @@
+import mongoose from "mongoose";
 import DsaSubmission from "../models/DsaSubmission.model.js";
+import UserMemory from "../models/UserMemory.model.js";
+import StudyPlan from "../models/StudyPlan.model.js";
+import { calculateDsaStats } from "../services/analytics.service.js";
 import { generateText } from "../services/gemini.service.js";
 import { extractJson } from "../utils/extractJson.js";
 import { executeCode } from "../services/codeExecution.service.js";
@@ -114,35 +118,26 @@ function validateGeneratedProblem(problem) {
   return true;
 }
 
-export async function generateProblem(req, res) {
-  try {
-    const { topic, difficulty } = req.body;
+export async function createDsaProblem({ topic, difficulty }) {
+  const allowedDifficulties = ["Easy", "Medium", "Hard"];
+  const matchedDifficulty =
+    allowedDifficulties.find(
+      (d) => d.toLowerCase() === String(difficulty || "").trim().toLowerCase()
+    ) || "Medium";
 
-    const allowedDifficulties = ["Easy", "Medium", "Hard"];
+  let normalizedTopic = String(topic || "Arrays").trim();
+  if (!normalizedTopic || normalizedTopic.length > 100) {
+    normalizedTopic = "Arrays";
+  }
 
-    if (
-      typeof topic !== "string" ||
-      !topic.trim() ||
-      topic.trim().length > 100 ||
-      typeof difficulty !== "string" ||
-      !allowedDifficulties.includes(difficulty)
-    ) {
-      return res.status(400).json({
-        error:
-          "A valid topic and difficulty (Easy, Medium, or Hard) are required.",
-      });
-    }
-
-    const normalizedTopic = topic.trim();
-
-    const prompt = `
+  const prompt = `
 You are a professional Data Structures and Algorithms problem setter
 for a programming interview practice platform.
 
 Generate ONE original, self-contained function-based DSA problem.
 
 TOPIC: ${normalizedTopic}
-DIFFICULTY: ${difficulty}
+DIFFICULTY: ${matchedDifficulty}
 
 PROBLEM REQUIREMENTS:
 1. Generate a clear title and an unambiguous problem description.
@@ -252,23 +247,58 @@ FINAL SELF-CHECK:
 - No solution code is included.
 `;
 
-    const responseText = await generateText(prompt);
-    const problem = extractJson(responseText);
+  const responseText = await generateText(prompt);
+  const problem = extractJson(responseText);
 
-    if (!validateGeneratedProblem(problem)) {
-      console.error("Invalid generated DSA problem:", problem);
+  if (!validateGeneratedProblem(problem)) {
+    console.error("Invalid generated DSA problem:", problem);
+    throw new Error("The AI generated an invalid problem. Please try again.");
+  }
 
-      return res.status(502).json({
-        error:
-          "The AI generated an invalid problem. Please try again.",
+  // Sanitize problem so hidden test inputs/outputs are never sent to the browser
+  const clientSafeProblem = sanitizeProblemForClient(problem);
+  return {
+    problem: clientSafeProblem,
+    topic: normalizedTopic,
+    difficulty: matchedDifficulty,
+  };
+}
+
+export async function generateProblem(req, res) {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        message: "Authentication required. Please sign in.",
       });
     }
 
-    // Sanitize problem so hidden test inputs/outputs are never sent to the browser
-    const clientSafeProblem = sanitizeProblemForClient(problem);
-    return res.status(200).json(clientSafeProblem);
+    const { topic, difficulty } = req.body;
+
+    const allowedDifficulties = ["Easy", "Medium", "Hard"];
+
+    if (
+      typeof topic !== "string" ||
+      !topic.trim() ||
+      topic.trim().length > 100 ||
+      typeof difficulty !== "string" ||
+      !allowedDifficulties.includes(difficulty)
+    ) {
+      return res.status(400).json({
+        error:
+          "A valid topic and difficulty (Easy, Medium, or Hard) are required.",
+      });
+    }
+
+    const result = await createDsaProblem({ topic, difficulty });
+    return res.status(200).json(result.problem);
   } catch (error) {
     console.error("Error generating problem:", error);
+
+    if (error.message && error.message.includes("invalid problem")) {
+      return res.status(502).json({
+        error: error.message,
+      });
+    }
 
     return res.status(500).json({
       error: "Failed to generate problem. Please try again.",
@@ -282,6 +312,12 @@ FINAL SELF-CHECK:
  */
 export async function runCode(req, res) {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        message: "Authentication required. Please sign in.",
+      });
+    }
+
     const { problem, code, language, problemId: bodyProblemId } = req.body;
     const supportedLanguages = ["javascript", "python", "java", "cpp"];
 
@@ -344,6 +380,12 @@ export async function runCode(req, res) {
  */
 export async function evaluateCode(req, res) {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        message: "Authentication required. Please sign in.",
+      });
+    }
+
     const { problem, code, language, topic, problemId: bodyProblemId } = req.body;
 
     const supportedLanguages = ["javascript", "python", "java", "cpp"];
@@ -490,7 +532,9 @@ Return only one valid JSON object:
     try {
       const newSubmission = new DsaSubmission({
         user: req.user.id,
+        problemId: problemId ? String(problemId) : null,
         problem: {
+          id: problemId ? String(problemId) : null,
           title: problem.title,
           description: problem.description,
         },
@@ -537,6 +581,13 @@ Return only one valid JSON object:
 const SUPPORTED_LANGUAGES = ["javascript", "python", "java", "cpp"];
 
 function validateCoachInput(req, res) {
+  if (!req.user || !req.user.id) {
+    res.status(401).json({
+      message: "Authentication required. Please sign in.",
+    });
+    return null;
+  }
+
   const { problem, language } = req.body;
 
   if (
@@ -590,10 +641,19 @@ export async function getHint(req, res) {
   if (!validated) return;
 
   const { problem, language } = validated;
-  const { code = "" } = req.body;
+  const { code = "", hintLevel = 1, previousHints = [] } = req.body;
+
+  const levelDescriptions = {
+    1: "Hint 1: A small conceptual nudge pointing toward the underlying pattern or suitable data structure.",
+    2: "Hint 2: A more specific observation, key mathematical property, invariant, or subproblem structure.",
+    3: "Hint 3: The key algorithmic insight or direction that unlocks the solution without giving away raw code.",
+  };
+
+  const levelInstruction =
+    levelDescriptions[hintLevel] || levelDescriptions[1];
 
   const prompt = `
-You are a concise, supportive DSA interview coach.
+You are Pepe, a concise and encouraging DSA interview coach.
 
 PROBLEM:
 Title: ${problem.title}
@@ -604,19 +664,25 @@ ${JSON.stringify(problem.examples ?? [])}
 
 Language: ${language}
 
-Learner's code:
+Learner's current code:
 ${String(code).slice(0, 12000) || "No code written yet."}
 
-RULES:
-1. Give exactly ONE useful hint in 2-3 short sentences.
-2. Point toward the relevant data structure, algorithm, or next step.
-3. If code exists, identify one likely issue without rewriting the code.
-4. Do not reveal the complete algorithm or solution.
-5. Do not include code blocks, lengthy explanations, or follow-up sections.
-6. Use plain text or simple Markdown only.
-7. Never use LaTeX, dollar signs for math, escaped Markdown symbols,
-   or decorative headings.
-8. Return only the hint.
+CURRENT COACHING STAGE:
+${levelInstruction}
+
+PREVIOUS HINTS ALREADY PROVIDED:
+${Array.isArray(previousHints) && previousHints.length > 0
+      ? previousHints.map((h, i) => `Hint ${i + 1}: ${h}`).join("\n")
+      : "None yet."
+    }
+
+CRITICAL RULES:
+1. Provide exactly ONE distinct hint for this stage in 2-3 short sentences.
+2. DO NOT repeat or simply rephrase any previous hints. Add a genuinely new, more specific insight.
+3. If user code exists, you may note a high-level issue or missing check without rewriting the code.
+4. Do NOT reveal the complete algorithm or give full solution code.
+5. Use plain text or simple Markdown only. No LaTeX ($ or $$).
+6. Return only the hint text.
 `;
 
   return generateCoachResponse(res, prompt);
@@ -630,7 +696,7 @@ export async function explainApproach(req, res) {
   const { problem, language } = validated;
 
   const prompt = `
-You are an experienced DSA interview coach.
+You are Pepe, an experienced and articulate DSA interview coach.
 Explain the recommended approach clearly and concisely.
 
 PROBLEM:
@@ -648,29 +714,26 @@ Use exactly these four sections:
 Explain the main insight in 2-3 sentences.
 
 ### Algorithm
-Give 3-5 numbered steps. Explain what the algorithm does,
+Give 3-5 numbered steps. Explain what the algorithm does conceptually,
 not the complete implementation.
 
 ### Complexity
 State time and auxiliary space complexity using plain text,
 for example O(n) or O(1), with one short justification each.
 
-### Why it works
-Explain in 1-2 sentences why the approach solves the problem.
+### Correctness intuition
+Explain in 1-2 sentences why the approach solves the problem and handles boundary conditions.
 
 STRICT OUTPUT RULES:
 1. Keep the complete response under 250 words.
-2. Do not include a dry run unless the user specifically asks for one.
-3. Do not compare alternative approaches unless comparison is essential.
-4. Do not provide the complete implementation.
-5. Do not repeat the problem statement.
+2. Do not include a dry run unless essential.
+3. Do not provide the full code block.
+4. Do not repeat the problem statement.
+5. If the problem involves subarrays or peaks/valleys, clarify that subarray endpoints only have one neighbor within the subarray and cannot be peaks or valleys.
 6. Use normal Markdown headings, numbered lists, and inline code where useful.
-7. Write mathematical expressions in plain text, such as
-   nums[i] = target - nums[j].
-8. Never use LaTeX, $$, \\text{}, \\frac{}, or escaped Markdown
-   such as \\###, \\---, or \\|.
-9. Do not create tables, unnecessary headings, or a long introduction.
-10. Return only the explanation.
+7. Write mathematical expressions in plain text (e.g. nums[i] = target - nums[j]).
+8. Never use LaTeX, $$, \\text{}, or escaped Markdown.
+9. Return only the explanation.
 `;
 
   return generateCoachResponse(res, prompt);
@@ -693,10 +756,23 @@ Description: ${problem.description}
 Examples:
 ${JSON.stringify(problem.examples ?? [])}
 
+Constraints:
+${JSON.stringify(problem.constraints ?? [])}
+
 Required language: ${language}
 
 Available boilerplate:
 ${JSON.stringify(problem.boilerplates?.[language] ?? null)}
+
+SPECIAL PROBLEM ACCURACY RULES:
+1. If the problem involves subarrays with peak/valley conditions (such as Max Peak-Valley Balance):
+   - By definition, an element in a subarray is a peak only if it has two neighbors in that subarray and is strictly greater than both.
+   - An element in a subarray is a valley only if it has two neighbors in that subarray and is strictly smaller than both.
+   - Therefore, elements at the endpoints of the selected subarray (first and last elements) CANNOT be peaks or valleys of that subarray.
+   - Any transformed score array must never count subarray boundary endpoints.
+   - Empty or length < 3 subarrays have 0 interior elements and balance 0.
+2. Ensure the code is strictly correct, handles edge cases (empty array, single element, negative numbers, duplicates), and respects the given function signature.
+3. Never claim the code was executed in a sandbox.
 
 RESPONSE FORMAT:
 
@@ -704,23 +780,450 @@ RESPONSE FORMAT:
 Explain the core idea in no more than 3 sentences.
 
 ### Code
-Provide the complete implementation in exactly one fenced code block.
-Use the requested language and respect the provided function signature
-when possible.
+Provide the complete implementation in exactly one fenced code block (\`\`\`${language} ... \`\`\`).
+Use the requested language and respect the provided function signature.
 
 ### Complexity
 State time and auxiliary space complexity, each with a brief justification.
 
-RULES:
-1. Make the implementation consistent with the problem statement and examples.
-2. Handle relevant edge cases and avoid unnecessary code.
-3. If constraints are missing, state any important assumption briefly.
-4. Never claim the code was executed or tested in a sandbox.
-5. Use plain text for mathematical expressions. Do not use LaTeX.
-6. Do not escape Markdown headings, list markers, or code fences.
-7. Do not add multiple solutions, lengthy dry runs, or unrelated explanations.
-8. Return only the formatted Markdown response.
+Return only the formatted Markdown response.
 `;
 
   return generateCoachResponse(res, prompt);
 }
+
+/**
+ * Unified multi-turn conversational chat, onboarding, study plan generation,
+ * progressive coaching, and failed-test debugging for Pepe AI Coach.
+ */
+export async function coachChat(req, res) {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        message: "Authentication required. Please sign in.",
+      });
+    }
+
+    const {
+      message = "",
+      action = "chat", // "chat" | "hint" | "approach" | "solution" | "debug" | "plan"
+      history = [],
+      problem = null,
+      code = "",
+      language = "javascript",
+      hintLevel = 1,
+      previousHints = [],
+      onboardingProfile = null,
+      plan = null,
+      execution = null,
+    } = req.body;
+
+    const trimmedMessage = String(message || "").trim();
+
+    if (!trimmedMessage && !action) {
+      return res.status(400).json({
+        error: "A message or coach action is required.",
+      });
+    }
+
+    const userId = req.user?.id;
+    let activeProfile = onboardingProfile;
+    let activePlan = plan;
+
+    // Load persisted study plan if client didn't supply full profile/plan
+    if (userId && mongoose.Types.ObjectId.isValid(userId) && mongoose.connection.readyState === 1) {
+      try {
+        const persistedDoc = await StudyPlan.findOne({ user: userId });
+        if (!activeProfile && persistedDoc?.onboardingProfile) {
+          activeProfile = persistedDoc.onboardingProfile;
+        }
+        if (!activePlan && persistedDoc?.plan) {
+          activePlan = persistedDoc.plan;
+        }
+      } catch (err) {
+        console.warn("Failed to load user StudyPlan for coach context:", err.message);
+      }
+    }
+
+    // Fetch user submission history to ground personalized plans in real performance
+    let userStats = null;
+    if (userId && mongoose.Types.ObjectId.isValid(userId) && mongoose.connection.readyState === 1) {
+      try {
+        const userSubmissions = await DsaSubmission.find({ user: userId });
+        userStats = calculateDsaStats(userSubmissions);
+      } catch (statsErr) {
+        console.warn("Failed to fetch user submissions for coach context:", statsErr.message);
+      }
+    }
+
+    // Build context
+    let contextPrompt = `You are Pepe, PrepAI's intelligent, friendly, encouraging, and technically sharp DSA coach.
+Your mission is to guide users through DSA interview preparation:
+- Help users onboard and craft personalized, realistic weekly study plans based on their goals, weak topics, and daily study time.
+- Answer general questions, small talk, and interview prep queries naturally and engagingly.
+- When an active problem is provided, deliver progressive hints, approach explanations, solution code, or diagnosis of failed code.
+- Respond naturally to greetings (e.g. "Hi, my name is Aman"), small talk, doubts, frustration, or conversational prompts (e.g. "You can't talk").
+- NEVER reply with a rigid generic error or canned refusal menu when the user speaks naturally.
+- Never claim you ran code or verified tests when you did not.
+- Never invent expected outputs or reveal confidential hidden test cases.
+`;
+
+    if (activeProfile && typeof activeProfile === "object" && Object.keys(activeProfile).length > 0) {
+      contextPrompt += `\nUSER ONBOARDING PROFILE:
+- Target Companies: ${activeProfile.targetCompanies || "Not specified yet"}
+- Topics Covered: ${activeProfile.topicsCovered || "Not specified yet"}
+- Skill Level / Weak Topics: ${activeProfile.weakTopics || activeProfile.skillLevel || "Not specified yet"}
+- Daily Study Time: ${activeProfile.dailyTime || "Not specified yet"}
+- Preferred Schedule: ${activeProfile.schedule || "Not specified yet"}
+`;
+      if (activeProfile.targetCompanies || activeProfile.dailyTime) {
+        contextPrompt += `NOTE: The user has already completed onboarding. DO NOT re-ask the initial onboarding questions unless the user explicitly asks to restart or change them.\n`;
+      }
+    }
+
+    if (activePlan && typeof activePlan === "object" && (activePlan.schedule?.length || activePlan.title)) {
+      contextPrompt += `\nCURRENT STUDY PLAN:
+${JSON.stringify(activePlan, null, 2)}
+`;
+    }
+
+    if (userStats) {
+      if (userStats.totalAttempts > 0) {
+        contextPrompt += `\nREAL USER SUBMISSION PERFORMANCE (AUTHORITATIVE HISTORICAL STATS):
+- Total Attempts: ${userStats.totalAttempts}
+- Total Successful Attempts (Accepted): ${userStats.acceptedAttempts}
+- Unique Successfully Solved Problems: ${userStats.uniqueSolved}
+- Overall Acceptance Rate: ${userStats.acceptanceRate}%
+- Topic Breakdown:
+${userStats.topicBreakdown.map((t) => `  * ${t.topic}: ${t.uniqueSolved} unique solved / ${t.attempts} attempts (${t.acceptanceRate}% acceptance rate)${t.needsImprovement ? " [NEEDS IMPROVEMENT]" : ""}`).join("\n")}
+
+INSTRUCTIONS FOR STUDY PLAN CREATION / UPDATES:
+- Use the real submission data above to personalize the plan. Allocate more focus/days to topics marked [NEEDS IMPROVEMENT] or with 0 solved problems.
+- Acknowledge their strengths where acceptance rate is high.
+`;
+      } else {
+        contextPrompt += `\nREAL USER SUBMISSION PERFORMANCE:
+- User is new and has 0 submissions so far.
+- Formulate a balanced starter plan based on their stated target companies, weak topics, and daily available study time without mentioning negative stats.
+`;
+      }
+    }
+
+    if (problem && problem.title) {
+      contextPrompt += `\nACTIVE DSA PROBLEM:
+Title: ${problem.title}
+Description: ${problem.description}
+Examples: ${JSON.stringify(problem.examples ?? [])}
+Constraints: ${JSON.stringify(problem.constraints ?? [])}
+Language: ${language}
+User's Code in Editor:
+${String(code).slice(0, 10000) || "No code written yet."}
+`;
+    }
+
+    // Handle specific actions or construct conversation
+    if (action === "debug") {
+      let failureDetails = "";
+      if (execution) {
+        failureDetails += `Verdict: ${execution.verdict || "Evaluation Failed"}\n`;
+        failureDetails += `Passed Test Cases: ${execution.passed ?? 0} / ${execution.total ?? 0}\n`;
+        if (execution.error) {
+          failureDetails += `Error output: ${execution.error}\n`;
+        }
+        if (Array.isArray(execution.testResults)) {
+          const visibleFailed = execution.testResults.filter(
+            (t) => !t.passed && !t.isHidden
+          );
+          if (visibleFailed.length > 0) {
+            failureDetails += `Visible failed test cases:\n${JSON.stringify(
+              visibleFailed.map((t) => ({
+                input: t.input,
+                expected: t.expected,
+                actual: t.actual,
+                runtimeError: t.runtimeError,
+              })),
+              null,
+              2
+            )}\n`;
+          }
+          const hiddenFailed = execution.testResults.filter(
+            (t) => !t.passed && t.isHidden
+          );
+          if (hiddenFailed.length > 0) {
+            failureDetails += `${hiddenFailed.length} hidden test case(s) failed. (Hidden test inputs/outputs are private and must NEVER be guessed, invented, or revealed).\n`;
+          }
+        }
+      }
+
+      contextPrompt += `\nDEBUGGING TASK:
+The user tested their code and encountered a failure.
+Execution Details:
+${failureDetails || "No execution details supplied."}
+
+USER QUERY:
+${trimmedMessage || "Please debug my failed solution and tell me why it failed."}
+
+DEBUGGING INSTRUCTIONS:
+1. Explain the likely root cause of the failure based on the actual verdict (Wrong Answer, Compilation Error, Runtime Error, or Time Limit Exceeded).
+2. Distinguish compilation syntax errors vs runtime exceptions vs infinite loops/timeouts vs algorithmic logic flaws.
+3. If visible test cases failed, compare what the code did versus what was expected.
+4. If only hidden tests failed, do NOT guess hidden inputs. Suggest likely edge cases (e.g. empty array, small length, negative numbers, duplicates, or boundary elements).
+5. If the problem is Max Peak-Valley Balance or involves subarrays, specifically check if the code counted subarray endpoints as peaks/valleys or ran Kadane globally on scores without excluding subarray endpoints.
+6. Propose a targeted correction or guidance. Be constructive and concise.
+`;
+    } else if (action === "hint") {
+      const hintTitles = {
+        1: "Hint 1: Conceptual nudge on problem pattern and structure.",
+        2: "Hint 2: Specific observation, mathematical invariant, or boundary property.",
+        3: "Hint 3: Key algorithmic insight, recurrence, or data structure direction.",
+      };
+      contextPrompt += `\nHINT REQUEST (Stage ${hintLevel}):
+${hintTitles[hintLevel] || hintTitles[1]}
+Previous hints already provided:
+${Array.isArray(previousHints) && previousHints.length > 0
+          ? previousHints.map((h, i) => `Hint ${i + 1}: ${h}`).join("\n")
+          : "None yet."
+        }
+RULES:
+1. Give exactly ONE useful hint in 2-3 sentences.
+2. DO NOT repeat or rephrase previous hints.
+3. Point out new direction without giving away complete code.
+`;
+    } else if (action === "approach") {
+      contextPrompt += `\nAPPROACH EXPLANATION REQUEST:
+The user is asking for a clear conceptual explanation of the algorithm/approach to solve this problem.
+RULES:
+1. Explain the intuition step-by-step (e.g. brute force vs optimal).
+2. Outline the algorithmic steps clearly.
+3. Mention time and space complexities.
+4. DO NOT provide the full solution code yet (leave implementation to the user).
+`;
+    } else if (action === "solution") {
+      contextPrompt += `\nCOMPLETE SOLUTION REQUEST:
+The user has requested the full reference solution.
+RULES:
+1. State the optimal approach and time/space complexity briefly.
+2. Provide the complete, working, optimal solution in \`${language}\`.
+3. Wrap the solution code in a \`\`\`${language} markdown code block.
+4. Ensure the function signature exactly matches the active problem's requirement.
+5. Explain key lines or edge cases handled in the code.
+`;
+    } else {
+      // General conversation or onboarding
+      if (Array.isArray(history) && history.length > 0) {
+        contextPrompt += `\nRECENT CONVERSATION HISTORY:\n`;
+        const recent = history.slice(-8);
+        for (const item of recent) {
+          contextPrompt += `${item.role === "user" ? "User" : "Pepe"}: ${item.text}\n`;
+        }
+      }
+
+      contextPrompt += `\nUSER'S LATEST MESSAGE:
+${trimmedMessage}
+
+INSTRUCTIONS:
+1. If the user is introducing themselves, greeting, asking how you can help, or making small talk, respond warmly as Pepe.
+2. If the user mentions target companies, available daily time, or topics covered/weak:
+   - Acknowledge those details warmly.
+   - Enclose updated profile fields in \`[PROFILE_JSON]{"targetCompanies": "...", "weakTopics": "...", "dailyTime": "...", "topicsCovered": "..."}[/PROFILE_JSON]\`.
+   - Never re-ask questions that are already answered in USER ONBOARDING PROFILE.
+3. If the user asks to generate, create, load, or practice a DSA problem (e.g. "Generate a medium Array problem for me", "Give me a hard DP problem", "Generate another problem", "Can you load a tree question?"):
+   - YOU MUST call the generate_problem tool:
+     [TOOL_CALL:generate_problem]
+     {"topic": "<extracted topic or Arrays>", "difficulty": "<Easy | Medium | Hard>"}
+     [/TOOL_CALL]
+   - DO NOT write a problem statement, description, or test cases in your chat text. The arena will load it automatically!
+4. If the user asks for a study plan or to personalize/revise their plan:
+   - Provide a concise conversational overview.
+   - Enclose a structured JSON study plan in \`[PLAN_JSON]...[/PLAN_JSON]\` tag using this schema:
+     {
+       "title": "Personalized Weekly Plan Title",
+       "dailyTarget": "e.g. 60 min daily",
+       "focusAreas": "e.g. Graphs & DP for FAANG",
+       "schedule": [
+         {"day": "Monday", "topic": "...", "task": "..."},
+         {"day": "Tuesday", "topic": "...", "task": "..."},
+         {"day": "Wednesday", "topic": "...", "task": "..."},
+         {"day": "Thursday", "topic": "...", "task": "..."},
+         {"day": "Friday", "topic": "...", "task": "..."},
+         {"day": "Saturday", "topic": "...", "task": "..."},
+         {"day": "Sunday", "topic": "...", "task": "..."}
+       ],
+       "dailyRoutine": "Brief daily advice"
+     }
+5. If the user asks a question about the active problem or code, answer directly and contextually.
+6. If the user asks conceptual questions (e.g. "What is a hash map?"), explain clearly without altering the active problem.
+7. If the user expresses frustration or says "You can't talk", reply politely, humorously, and helpfully.
+8. Keep conversational text clear, concise, and formatted in standard Markdown.
+`;
+    }
+
+    const aiResponse = await generateText(contextPrompt);
+
+    if (!aiResponse || !aiResponse.trim()) {
+      return res.status(502).json({
+        error: "The AI returned an empty response. Please try again.",
+      });
+    }
+
+    let finalAnswer = aiResponse.trim();
+    let generatedPlan = null;
+    let updatedProfile = onboardingProfile ? { ...onboardingProfile } : null;
+
+    // Extract profile updates if present
+    const profileMatch = finalAnswer.match(/\[PROFILE_JSON\]([\s\S]*?)\[\/PROFILE_JSON\]/);
+    if (profileMatch) {
+      try {
+        const parsedProfile = JSON.parse(profileMatch[1].trim());
+        updatedProfile = { ...(updatedProfile || {}), ...parsedProfile };
+        finalAnswer = finalAnswer.replace(/\[PROFILE_JSON\][\s\S]*?\[\/PROFILE_JSON\]/, "").trim();
+      } catch (err) {
+        console.warn("Failed to parse PROFILE_JSON block:", err.message);
+      }
+    }
+
+    // Check for tool call: generate_problem
+    const toolCallMatch = finalAnswer.match(/\[TOOL_CALL:generate_problem\]([\s\S]*?)\[\/TOOL_CALL\]/i);
+    const isExplicitGenRequest =
+      !toolCallMatch &&
+      action === "chat" &&
+      /\b(?:generate|create|give me|load)\s+(?:a|an)?\s*(?:new\s+)?(?:easy|medium|hard)?\s*[\w\s]*?(?:problem|question)\b/i.test(trimmedMessage);
+
+    if (toolCallMatch || isExplicitGenRequest) {
+      let targetTopic = "Arrays";
+      let targetDifficulty = "Medium";
+
+      if (toolCallMatch) {
+        try {
+          const parsedArgs = JSON.parse(toolCallMatch[1].trim());
+          if (parsedArgs.topic && typeof parsedArgs.topic === "string") {
+            targetTopic = parsedArgs.topic.trim();
+          }
+          if (parsedArgs.difficulty && typeof parsedArgs.difficulty === "string") {
+            targetDifficulty = parsedArgs.difficulty.trim();
+          }
+        } catch (err) {
+          console.warn("Failed to parse tool call args:", err.message);
+        }
+      } else {
+        const diffMatch = trimmedMessage.match(/\b(easy|medium|hard)\b/i);
+        if (diffMatch) {
+          targetDifficulty = diffMatch[1][0].toUpperCase() + diffMatch[1].slice(1).toLowerCase();
+        }
+        const topicMatch = trimmedMessage.match(/\b(array|arrays|string|strings|dynamic programming|dp|tree|trees|graph|graphs|binary search|hash table|hash map|two pointers|stack|queue|recursion|greedy|heap|linked list)\b/i);
+        if (topicMatch) {
+          targetTopic = topicMatch[1];
+        }
+      }
+
+      try {
+        const result = await createDsaProblem({
+          topic: targetTopic,
+          difficulty: targetDifficulty,
+        });
+
+        // Generate warm confirmation message observing the actual problem created
+        const confirmPrompt = `You are Pepe, the DSA Coach.
+The user asked: "${trimmedMessage}".
+You just successfully created and loaded the DSA problem "${result.problem.title}" (${result.difficulty} difficulty, topic: ${result.topic}) into their DSA Arena.
+Give a warm, encouraging 1-2 sentence confirmation to the user stating that the ${result.difficulty} ${result.topic} problem has been loaded into their DSA Arena, and encourage them to try solving it or ask for a hint whenever they need one.
+Do not output code or full test cases. Return only the confirmation message.`;
+
+        let confirmationAnswer = "";
+        try {
+          confirmationAnswer = (await generateText(confirmPrompt)).trim();
+        } catch {
+          confirmationAnswer = `I've loaded a ${result.difficulty} ${result.topic} problem ("${result.problem.title}") into your DSA Arena. Try solving it, and ask me for a hint whenever you need one!`;
+        }
+
+        return res.status(200).json({
+          answer: confirmationAnswer,
+          action: "load_problem",
+          problem: result.problem,
+          topic: result.topic,
+          difficulty: result.difficulty,
+          onboardingProfile: updatedProfile,
+        });
+      } catch (err) {
+        console.error("Tool execution failed for createDsaProblem:", err);
+        return res.status(200).json({
+          answer: `I tried to generate a ${targetDifficulty} ${targetTopic} problem for your DSA Arena, but encountered an error: ${err.message}. Please try asking again.`,
+          action: "chat",
+          onboardingProfile: updatedProfile,
+        });
+      }
+    }
+
+    const planMatch = finalAnswer.match(/\[PLAN_JSON\]([\s\S]*?)\[\/PLAN_JSON\]/);
+    if (planMatch) {
+      try {
+        generatedPlan = JSON.parse(planMatch[1].trim());
+        finalAnswer = finalAnswer.replace(/\[PLAN_JSON\][\s\S]*?\[\/PLAN_JSON\]/, "").trim();
+      } catch (parseErr) {
+        console.error("Failed to parse PLAN_JSON block:", parseErr.message);
+      }
+    }
+
+    // Persist updated study plan / onboarding profile changes to MongoDB
+    if (userId && mongoose.Types.ObjectId.isValid(userId) && mongoose.connection.readyState === 1) {
+      try {
+        const updateFields = {};
+        if (updatedProfile && typeof updatedProfile === "object") {
+          updateFields.onboardingProfile = updatedProfile;
+        }
+        if (generatedPlan && typeof generatedPlan === "object") {
+          updateFields.plan = generatedPlan;
+        }
+        if (Object.keys(updateFields).length > 0) {
+          await StudyPlan.findOneAndUpdate(
+            { user: userId },
+            { $set: updateFields },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
+        }
+      } catch (savePlanErr) {
+        console.warn("Error auto-persisting StudyPlan in coachChat:", savePlanErr.message);
+      }
+    }
+
+    return res.status(200).json({
+      answer: finalAnswer,
+      plan: generatedPlan,
+      onboardingProfile: updatedProfile,
+    });
+  } catch (error) {
+    console.error("Error in Pepe coachChat:", error);
+    return res.status(500).json({
+      error: error.message || "Failed to get response from Pepe AI Coach.",
+    });
+  }
+}
+
+/**
+ * Clears coach memory records for the authenticated user from the database.
+ */
+export async function clearCoachData(req, res) {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        message: "Authentication required. Please sign in.",
+      });
+    }
+
+    const userId = req.user.id;
+    if (mongoose.Types.ObjectId.isValid(userId) && mongoose.connection.readyState === 1) {
+      await UserMemory.deleteMany({ user: userId, source: "dsa" });
+      await StudyPlan.deleteMany({ user: userId });
+    }
+    return res.status(200).json({
+      success: true,
+      message: "Pepe Coach saved records successfully cleared.",
+    });
+  } catch (error) {
+    console.error("Error in clearCoachData:", error);
+    return res.status(500).json({
+      error: "Failed to clear coach data from database.",
+    });
+  }
+}
+
