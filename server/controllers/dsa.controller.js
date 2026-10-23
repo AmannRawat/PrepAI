@@ -165,7 +165,7 @@ export function sanitizeAiProblemConfirmation(rawAnswer, result, detectedCompany
   return cleaned;
 }
 
-function validateGeneratedProblem(problem) {
+export function validateGeneratedProblem(problem) {
   const supportedLanguages = ["javascript", "python", "java", "cpp"];
 
   if (
@@ -267,7 +267,41 @@ function validateGeneratedProblem(problem) {
     return false;
   }
 
+  if (problem.referenceSolution) {
+    if (
+      typeof problem.referenceSolution !== "object" ||
+      typeof problem.referenceSolution.code !== "string" ||
+      !problem.referenceSolution.code.trim()
+    ) {
+      return false;
+    }
+  }
+
   return true;
+}
+
+/**
+ * Checks whether the reference solution implementation's structure contradicts its claimed complexity.
+ * Prevents claiming O(n) or O(1) when the implementation contains quadratic nested loops.
+ */
+export function hasComplexityMismatch(referenceSolution) {
+  if (!referenceSolution || typeof referenceSolution !== "object") return false;
+  const timeComp = String(referenceSolution.timeComplexity || "").toLowerCase();
+  const code = String(referenceSolution.code || "");
+
+  const claimsLinearOrBetter =
+    /\bo\(\s*(?:1|log\s*n|n)\s*\)/i.test(timeComp) &&
+    !/\bo\(\s*(?:n\s*(?:\^2|2|\*\s*n|log\s*n))\s*\)/i.test(timeComp);
+
+  if (claimsLinearOrBetter) {
+    // Check for nested loops where the inner loop iterates over dynamic bounds or array variables
+    const nestedForOrWhile =
+      /(?:for|while)\s*\([^)]*\)\s*\{[\s\S]*?(?:for|while)\s*\([^)]*(?:<|<=|>|>=)\s*[^;)]*(?:length|size|\bn\b|[a-zA-Z0-9_$]*bound|[a-zA-Z0-9_$]*limit|R|L)/i;
+    if (nestedForOrWhile.test(code)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function createDsaProblem({ topic, difficulty }) {
@@ -318,27 +352,37 @@ FUNCTION INTERFACE:
 - Do not use custom data structures unless their interface is fully defined.
 
 TEST CASE REQUIREMENTS:
-1. Generate between 6 and 10 test cases.
+1. Generate between 4 and 6 test cases (2 visible, 2 to 4 hidden).
 2. Every test case must contain:
    - input: an object whose keys match the function parameters.
    - expectedOutput: the exact expected return value.
    - isHidden: a boolean.
-3. Include at least two visible cases and at least three hidden cases.
+3. Include at least two visible cases and at least two hidden cases.
 4. Cover normal cases, boundary cases and relevant edge cases.
-5. Ensure each expectedOutput is correct for its input.
-6. Test inputs and expected outputs must be JSON-serializable.
-7. Do not use undefined, NaN, Infinity, functions, or language-specific objects.
-8. Every test case must match the same function signature.
-9. Do not make hidden test cases visible in the problem description or examples.
-10. Examples must agree with their corresponding visible test cases.
+5. Every expectedOutput MUST be 100% mathematically correct and identical to what referenceSolution returns.
+6. Use exact raw data types for expectedOutput: if the function returns a number, use a raw JSON number (e.g. 42, not "42"); if a boolean, use a raw JSON boolean (true/false, not "true"); if an array, use a raw JSON array (e.g. [1, 2], not "[1, 2]").
+7. Test inputs and expected outputs must be JSON-serializable.
+8. Do not use undefined, NaN, Infinity, functions, or language-specific objects.
+9. Every test case must match the same function signature.
+10. Do not make hidden test cases visible in the problem description or examples.
 
 BOILERPLATES:
 - Provide valid starter code for JavaScript, Python, Java and C++.
 - Include the function or method signature and a placeholder body.
-- Do not include a complete solution.
+- Do not include a complete solution in boilerplates.
 - Use the exact same logical parameter names and return behavior in all languages.
 - Java and C++ must use class Solution.
 - Avoid unsupported or ambiguous types.
+
+REFERENCE SOLUTION:
+- Provide a complete, fully working reference solution in JavaScript.
+- The reference solution MUST implement the exact same function name and parameters as boilerplates.javascript.
+- The primary function must be declared first. Do not declare helper functions before the primary function.
+- The function must directly return the answer (not in-place void mutation).
+- It must pass EVERY test case in testCases without any errors.
+- Time Complexity: State the honest asymptotic time complexity (e.g. O(n), O(n log n)).
+  CRITICAL: Do NOT claim O(n) or O(1) complexity if your implementation contains nested loops or quadratic operations.
+- Space Complexity: State the true space complexity (e.g. O(1), O(n)).
 
 OUTPUT:
 Return ONLY one valid JSON object without Markdown fences.
@@ -369,19 +413,25 @@ Use exactly this schema:
     "java": "class Solution { public ReturnType exampleName(Type arg) { } }",
     "cpp": "class Solution { public: ReturnType exampleName(Type arg) { } };"
   },
+  "referenceSolution": {
+    "language": "javascript",
+    "code": "function exampleName(arg) {\\n  // complete working solution\\n}",
+    "timeComplexity": "O(n)",
+    "spaceComplexity": "O(1)"
+  },
   "testCases": [
     {
       "input": {
-        "arg": "example value"
+        "arg": 10
       },
-      "expectedOutput": "expected result",
+      "expectedOutput": 20,
       "isHidden": false
     },
     {
       "input": {
-        "arg": "another value"
+        "arg": 30
       },
-      "expectedOutput": "another result",
+      "expectedOutput": 60,
       "isHidden": true
     }
   ]
@@ -393,24 +443,79 @@ types, boilerplates, examples and expected outputs for the actual problem.
 FINAL SELF-CHECK:
 - JSON syntax is valid.
 - Every test case input has the correct parameters.
-- All expected outputs match the problem's intended behavior.
-- At least two test cases are visible and at least three are hidden.
-- Every language has a compatible function-based starter.
-- No solution code is included.
+- All expected outputs match the problem's intended behavior and reference solution.
+- At least two test cases are visible and at least two are hidden.
+- Reference solution compiles and passes every test case.
+- No false complexity claims.
 `;
 
-  const responseText = await generateText(prompt);
-  const problem = extractJson(responseText);
+  let problem = null;
+  let lastError = null;
 
-  if (!validateGeneratedProblem(problem)) {
-    console.error("Invalid generated DSA problem:", problem);
-    throw new Error("The AI generated an invalid problem. Please try again.");
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const responseText = await generateText(prompt);
+      const parsed = extractJson(responseText);
+
+      if (!validateGeneratedProblem(parsed)) {
+        throw new Error("Generated problem failed structural validation.");
+      }
+
+      // Check complexity claim honesty
+      if (parsed.referenceSolution && hasComplexityMismatch(parsed.referenceSolution)) {
+        console.warn("[Problem Validation Gate] Correcting complexity claim: solution contains nested loops but claimed O(n) or O(1).");
+        parsed.referenceSolution.timeComplexity = "O(n^2)";
+      }
+
+      // Validation Gate: Execute reference solution against every test case using the platform's evaluator
+      if (parsed.referenceSolution?.code && process.env.ONLINECOMPILER_API_KEY) {
+        try {
+          const validationResult = await executeCode({
+            code: parsed.referenceSolution.code,
+            language: "javascript",
+            testCases: parsed.testCases,
+            isRunCode: false,
+          });
+
+          if (validationResult.verdict !== "Accepted" || validationResult.passed !== parsed.testCases.length) {
+            console.error(`[Problem Validation Gate] Reference solution failed test cases: verdict '${validationResult.verdict}', passed ${validationResult.passed}/${parsed.testCases.length}.`);
+            throw new Error(
+              `Reference solution failed validation: verdict '${validationResult.verdict}' (${validationResult.passed}/${parsed.testCases.length} test cases passed).`
+            );
+          }
+        } catch (gateErr) {
+          if (gateErr.message && gateErr.message.includes("Reference solution failed validation")) {
+            throw gateErr;
+          }
+          console.warn("[Problem Validation Gate] Execution check encountered non-fatal provider issue:", gateErr.message);
+        }
+      }
+
+      problem = parsed;
+      break;
+    } catch (err) {
+      lastError = err;
+      console.warn(`Problem generation attempt ${attempt} failed validation gate:`, err.message);
+    }
+  }
+
+  if (!problem) {
+    console.error("Invalid generated DSA problem:", lastError);
+    throw new Error(
+      lastError?.message && lastError.message.includes("Reference solution failed")
+        ? lastError.message
+        : "The AI generated an invalid problem. Please try again."
+    );
   }
 
   // Sanitize problem so hidden test inputs/outputs are never sent to the browser
   const clientSafeProblem = sanitizeProblemForClient(problem);
   clientSafeProblem.difficulty = matchedDifficulty;
   clientSafeProblem.topic = normalizedTopic;
+  if (problem.referenceSolution) {
+    clientSafeProblem.referenceSolution = problem.referenceSolution;
+  }
+
   return {
     problem: clientSafeProblem,
     topic: normalizedTopic,
@@ -1023,6 +1128,13 @@ export async function coachChat(req, res) {
       }
     }
 
+    if (userSubmissionsList.length === 0 && Array.isArray(req.body?.submissions) && req.body.submissions.length > 0) {
+      userSubmissionsList = req.body.submissions;
+      if (!userStats) {
+        userStats = calculateDsaStats(userSubmissionsList);
+      }
+    }
+
     // Detect company question intent, difficulty, and topic filters if present in message
     let detectedCompany = null;
     let companyQuestionsResult = null;
@@ -1268,14 +1380,21 @@ RULES:
 4. DO NOT provide the full solution code yet (leave implementation to the user).
 `;
     } else if (action === "solution") {
+      let refSolutionNote = "";
+      if (problem?.referenceSolution?.code) {
+        refSolutionNote = `\nVALIDATED REFERENCE ALGORITHM:\n${problem.referenceSolution.code}\nTime Complexity: ${problem.referenceSolution.timeComplexity || "O(n)"}\nSpace Complexity: ${problem.referenceSolution.spaceComplexity || "O(1)"}\nUse this verified algorithm as the foundation for your solution in \`${language}\`.\n`;
+      }
+
       contextPrompt += `\nCOMPLETE SOLUTION REQUEST:
 The user has requested the full reference solution.
+${refSolutionNote}
 RULES:
-1. State the optimal approach and time/space complexity briefly.
+1. State the optimal approach and honest time/space complexity accurately.
 2. Provide the complete, working, optimal solution in \`${language}\`.
 3. Wrap the solution code in a \`\`\`${language} markdown code block.
 4. Ensure the function signature exactly matches the active problem's requirement.
 5. Explain key lines or edge cases handled in the code.
+6. Do NOT claim O(n) complexity if your implementation contains nested loops or quadratic operations.
 `;
     } else {
       // General conversation or onboarding
@@ -1491,6 +1610,16 @@ The user mentioned ${detectedCompany} in conversation. Acknowledge it warmly.
         } else if (companyQuestionsResult?.questions?.[0]?.topics?.[0]) {
           targetTopic = companyQuestionsResult.questions[0].topics[0];
         }
+      }
+
+      // CRITICAL ADAPTIVE DIFFICULTY ENFORCEMENT:
+      // If user explicitly specified a difficulty in their message, honor that explicit choice.
+      // Otherwise, targetDifficulty MUST strictly adhere to the engine recommendation (adaptiveAssessment.targetDifficulty),
+      // preventing arbitrary model tool arguments from suppressing promotion to Hard or demotion.
+      if (explicitDiffFromMsg || filterDifficulty) {
+        targetDifficulty = explicitDiffFromMsg || filterDifficulty;
+      } else if (adaptiveAssessment?.targetDifficulty) {
+        targetDifficulty = adaptiveAssessment.targetDifficulty;
       }
 
       try {

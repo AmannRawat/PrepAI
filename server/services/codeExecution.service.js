@@ -32,28 +32,99 @@ function normalizeValue(value) {
  * Compares actual and expected outputs, ignoring object key ordering.
  */
 function valuesEqual(actual, expected) {
-    return (
+    if (
         JSON.stringify(normalizeValue(actual)) ===
         JSON.stringify(normalizeValue(expected))
-    );
+    ) {
+        return true;
+    }
+
+    // Coerce numeric / boolean / JSON string representation in expectedOutput
+    if (typeof expected === "string" && actual !== null && actual !== undefined) {
+        const trimmed = expected.trim();
+        if (typeof actual === "number" && trimmed !== "" && !isNaN(Number(trimmed)) && Number(trimmed) === actual) {
+            return true;
+        }
+        if (typeof actual === "boolean" && (trimmed === "true" || trimmed === "false") && (trimmed === "true") === actual) {
+            return true;
+        }
+        if (typeof actual === "object") {
+            try {
+                const parsedExpected = JSON.parse(trimmed);
+                if (
+                    JSON.stringify(normalizeValue(actual)) ===
+                    JSON.stringify(normalizeValue(parsedExpected))
+                ) {
+                    return true;
+                }
+            } catch {
+                // Not valid JSON
+            }
+        }
+    }
+
+    // Coerce numeric / boolean / JSON string representation in actual
+    if (typeof actual === "string" && expected !== null && expected !== undefined) {
+        const trimmed = actual.trim();
+        if (typeof expected === "number" && trimmed !== "" && !isNaN(Number(trimmed)) && Number(trimmed) === expected) {
+            return true;
+        }
+        if (typeof expected === "boolean" && (trimmed === "true" || trimmed === "false") && (trimmed === "true") === expected) {
+            return true;
+        }
+        if (typeof expected === "object") {
+            try {
+                const parsedActual = JSON.parse(trimmed);
+                if (
+                    JSON.stringify(normalizeValue(parsedActual)) ===
+                    JSON.stringify(normalizeValue(expected))
+                ) {
+                    return true;
+                }
+            } catch {
+                // Not valid JSON
+            }
+        }
+    }
+
+    return false;
 }
 
 /**
  * Builds the JavaScript harness for function-based DSA problem execution.
  */
 function buildJavaScriptHarness(code, testCases) {
-    const match = code.match(
-        /\bfunction\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/
-    );
+    const allMatches = [...code.matchAll(/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/g)];
 
-    if (!match) {
+    if (!allMatches.length) {
         throw new Error(
             "Could not find a JavaScript function declaration. Use the provided function boilerplate."
         );
     }
 
-    const functionName = match[1];
-    const parameters = match[2]
+    // If multiple functions are present, identify the one matching test case parameter names
+    let bestMatch = allMatches[0];
+    if (allMatches.length > 1 && testCases.length > 0 && testCases[0].input && typeof testCases[0].input === "object") {
+        const inputKeys = Object.keys(testCases[0].input);
+        const matchWithParams = allMatches.find((m) => {
+            const params = m[2].split(",").map((p) => p.trim()).filter(Boolean);
+            return params.length === inputKeys.length && params.every((p) => inputKeys.includes(p));
+        });
+        if (matchWithParams) {
+            bestMatch = matchWithParams;
+        } else {
+            const matchByCount = allMatches.find((m) => {
+                const params = m[2].split(",").map((p) => p.trim()).filter(Boolean);
+                return params.length === inputKeys.length;
+            });
+            if (matchByCount) {
+                bestMatch = matchByCount;
+            }
+        }
+    }
+
+    const functionName = bestMatch[1];
+    const parameters = bestMatch[2]
         .split(",")
         .map((parameter) => parameter.trim())
         .filter(Boolean);

@@ -99,6 +99,8 @@ const DsaArena = () => {
   const [resetSessionCount, setResetSessionCount] = useState(0);
   const [hasGivenUp, setHasGivenUp] = useState(false);
   const [hintsUsed, setHintsUsed] = useState(0);
+  const [pendingProblemLoad, setPendingProblemLoad] = useState(null);
+  const lastSubmittedCodeRef = useRef(null);
 
   const handleGiveUp = useCallback(() => {
     setHasGivenUp(true);
@@ -200,6 +202,9 @@ const DsaArena = () => {
 
       if (parsedState.executionResults !== undefined) {
         setExecutionResults(parsedState.executionResults);
+        if (parsedState.executionResults && hasSavedCode) {
+          lastSubmittedCodeRef.current = codeToRestore;
+        }
       }
 
       if (parsedState.evaluationError !== undefined) {
@@ -356,6 +361,8 @@ const DsaArena = () => {
     setSelectedTestCaseIndex(0);
     setHasGivenUp(false);
     setProblem(null);
+    lastSubmittedCodeRef.current = null;
+    setPendingProblemLoad(null);
 
     const defaultCode = DEFAULT_BOILERPLATES[language] || DEFAULT_BOILERPLATES.javascript;
     setCode(defaultCode);
@@ -378,23 +385,10 @@ const DsaArena = () => {
     setHintsUsed(0);
   }, [language, dsaStorageKey]);
 
-  // Load a generated problem (e.g. from Pepe AI Coach tool invocation)
-  const handleLoadProblem = useCallback(
+  // Apply a newly loaded problem into state
+  const applyLoadProblem = useCallback(
     (newProblem, newTopic, newDifficulty) => {
       if (!newProblem) return false;
-
-      // Warn / confirm if user has unsaved code modifications
-      if (problem && code) {
-        const currentBoilerplate = getBoilerplate(problem, language);
-        if (code.trim() !== currentBoilerplate.trim()) {
-          const proceed = window.confirm(
-            'You have modified code for the current problem. Loading a new problem will reset your editor. Do you want to proceed?'
-          );
-          if (!proceed) {
-            return false;
-          }
-        }
-      }
 
       const problemId =
         newProblem?.id ||
@@ -429,6 +423,7 @@ const DsaArena = () => {
       setActiveResultsTab('tests');
       setSelectedTestCaseIndex(0);
       setHasGivenUp(false);
+      lastSubmittedCodeRef.current = null;
 
       initializedProblemRef.current = {
         problemKey: problemId || stableProblem.title,
@@ -450,7 +445,40 @@ const DsaArena = () => {
 
       return true;
     },
-    [problem, code, language, topic, difficulty, saveDsaState]
+    [language, topic, difficulty, saveDsaState]
+  );
+
+  // Load a generated problem (e.g. from Pepe AI Coach tool invocation)
+  const handleLoadProblem = useCallback(
+    (newProblem, newTopic, newDifficulty) => {
+      if (!newProblem) return false;
+
+      // Check if user has genuinely unsaved code modifications
+      if (problem && code) {
+        const currentBoilerplate = getBoilerplate(problem, language);
+        const isBoilerplate = code.trim() === currentBoilerplate.trim();
+        const isAccepted = executionResults?.verdict === 'Accepted';
+        const isAlreadySubmitted =
+          executionResults &&
+          lastSubmittedCodeRef.current &&
+          code.trim() === lastSubmittedCodeRef.current.trim();
+        const isKnownBroken =
+          problem.title === 'Peak Segment Product' || problem.isInvalid;
+
+        // Code is genuinely unsaved only if user modified it, it has not been accepted,
+        // it has not been submitted in its current state, and the problem is not known broken.
+        const hasUnsavedModifications =
+          !isBoilerplate && !isAccepted && !isAlreadySubmitted && !isKnownBroken;
+
+        if (hasUnsavedModifications) {
+          setPendingProblemLoad({ newProblem, newTopic, newDifficulty });
+          return false;
+        }
+      }
+
+      return applyLoadProblem(newProblem, newTopic, newDifficulty);
+    },
+    [problem, code, language, executionResults, applyLoadProblem]
   );
 
   // Clear all saved coach and DSA data
@@ -774,6 +802,7 @@ const DsaArena = () => {
 
       const data = response.data;
       setExecutionResults(data);
+      lastSubmittedCodeRef.current = code;
 
       const aiFeedback = data.feedback || {
         correctness: data.correctness,
@@ -984,6 +1013,41 @@ const DsaArena = () => {
         onHintLevelChange={setHintsUsed}
       />
 
+      {/* Styled Unsaved Changes Confirmation Modal */}
+      {pendingProblemLoad && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm rounded-xl border border-amber-500/30 bg-surface p-5 shadow-2xl">
+            <h3 className="text-sm font-bold text-amber-400 flex items-center gap-2">
+              <AlertTriangle size={18} className="shrink-0 text-amber-400" />
+              Unsaved Code Modifications
+            </h3>
+            <p className="mt-2 text-xs text-text-secondary leading-relaxed">
+              You have modified code for the current problem that has not been submitted. Loading a new problem will reset your editor. Do you want to proceed?
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingProblemLoad(null)}
+                className="flex-1 rounded-lg border border-text-secondary/20 px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-text-secondary/10 transition"
+              >
+                Keep Working
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const { newProblem, newTopic, newDifficulty } = pendingProblemLoad;
+                  setPendingProblemLoad(null);
+                  applyLoadProblem(newProblem, newTopic, newDifficulty);
+                }}
+                className="flex-1 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 transition"
+              >
+                Load New Problem
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="mb-6 flex-shrink-0">
         <h1 className="text-3xl font-bold text-text-primary">DSA Arena</h1>
         <p className="text-text-secondary">
@@ -1071,6 +1135,14 @@ const DsaArena = () => {
 
             {problem && (
               <div>
+                {(problem.isInvalid || problem.title === 'Peak Segment Product') && (
+                  <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle size={15} className="shrink-0 text-amber-400" />
+                      <span>This challenge was flagged for inconsistent test cases. Ask Pepe for another problem to practice a verified challenge.</span>
+                    </div>
+                  </div>
+                )}
                 <h3 className="text-lg font-bold text-text-primary mb-2">
                   {problem.title}
                 </h3>

@@ -99,6 +99,28 @@ export function getSubmissionDifficulty(sub) {
 }
 
 /**
+ * Normalizes topic names to canonical lower-cased categories to ensure singular/plural
+ * and alias variations match reliably.
+ */
+export function normalizeTopicName(topic) {
+  if (!topic || typeof topic !== "string") return "";
+  const lower = topic.trim().toLowerCase();
+  if (lower === "array" || lower === "arrays") return "arrays";
+  if (lower === "string" || lower === "strings") return "strings";
+  if (lower === "tree" || lower === "trees") return "trees";
+  if (lower === "graph" || lower === "graphs") return "graphs";
+  if (lower === "dp" || lower === "dynamic programming") return "dynamic programming";
+  if (lower === "binary search") return "binary search";
+  if (lower === "hash table" || lower === "hash map" || lower === "hashmap" || lower === "hashing") return "hash table";
+  if (lower === "two pointers" || lower === "two pointer") return "two pointers";
+  if (lower === "stack" || lower === "stacks") return "stacks";
+  if (lower === "queue" || lower === "queues") return "queues";
+  if (lower === "heap" || lower === "heaps" || lower === "priority queue") return "heaps";
+  if (lower === "linked list" || lower === "linked lists" || lower === "linkedlist") return "linked list";
+  return lower;
+}
+
+/**
  * Evaluates performance metrics from a slice of recent submissions.
  */
 export function summarizeRecentSubmissions(submissions) {
@@ -116,10 +138,10 @@ export function summarizeRecentSubmissions(submissions) {
     };
   }
 
-  // Submissions are assumed to be sorted most recent first. If timestamps exist, ensure sorted descending.
+  // Submissions are assumed to be sorted most recent first. If timestamps or ObjectId exist, ensure sorted descending.
   const sorted = [...submissions].sort((a, b) => {
-    const timeA = new Date(a.createdAt || 0).getTime();
-    const timeB = new Date(b.createdAt || 0).getTime();
+    const timeA = new Date(a.createdAt || (a._id?.getTimestamp ? a._id.getTimestamp() : 0)).getTime();
+    const timeB = new Date(b.createdAt || (b._id?.getTimestamp ? b._id.getTimestamp() : 0)).getTime();
     return timeB - timeA;
   });
 
@@ -215,9 +237,9 @@ export function evaluateAdaptiveDifficulty({
   // 3. Filter submissions by topic if topic has at least minSubmissionsForAdaptation
   let relevantSubmissions = Array.isArray(submissions) ? submissions : [];
   if (topic && typeof topic === "string") {
-    const topicTrimmed = topic.trim().toLowerCase();
+    const targetNorm = normalizeTopicName(topic);
     const topicFiltered = relevantSubmissions.filter(
-      (s) => s.topic && s.topic.trim().toLowerCase() === topicTrimmed
+      (s) => s.topic && normalizeTopicName(s.topic) === targetNorm
     );
     if (topicFiltered.length >= ADAPTIVE_DIFFICULTY_CONFIG.minSubmissionsForAdaptation) {
       relevantSubmissions = topicFiltered;

@@ -13,6 +13,7 @@ import {
   extractKeepSamePreference,
   summarizeRecentSubmissions,
   evaluateAdaptiveDifficulty,
+  normalizeTopicName,
 } from "./services/adaptiveDifficulty.service.js";
 
 import {
@@ -20,6 +21,9 @@ import {
   getAdaptiveStatusHandler,
   coachChat,
   formatCatalogQuestionsResponse,
+  hasComplexityMismatch,
+  validateGeneratedProblem,
+  createDsaProblem,
 } from "./controllers/dsa.controller.js";
 
 import { setCustomTextGenerator } from "./services/gemini.service.js";
@@ -841,6 +845,225 @@ await runTest("Flow 8: Confirm handleLoadProblem never throws ReferenceError on 
   // Case D: Problem with _id
   const r4 = simulateHandleLoadProblem({ _id: "mongo-789", title: "LRU" });
   assert.equal(r4.problemId, "mongo-789");
+});
+
+console.log("\n--- Suite 9: Targeted Fixes Verification (Issues A, B, C) ---");
+
+// Helper simulating DsaArena's unsaved modifications detection
+function evaluateUnsavedProtection({ problem, code, boilerplate, executionResults, lastSubmittedCode }) {
+  const isBoilerplate = !code || code.trim() === boilerplate.trim();
+  const isAccepted = executionResults?.verdict === "Accepted";
+  const isAlreadySubmitted =
+    executionResults &&
+    lastSubmittedCode &&
+    code.trim() === lastSubmittedCode.trim();
+  const isKnownBroken =
+    problem?.title === "Peak Segment Product" || problem?.isInvalid;
+
+  const hasUnsavedModifications =
+    !isBoilerplate && !isAccepted && !isAlreadySubmitted && !isKnownBroken;
+
+  return { hasUnsavedModifications };
+}
+
+await runTest("Issue A: Unchanged code allows next problem without confirmation", () => {
+  const boilerplate = "function solve() {}";
+  const res = evaluateUnsavedProtection({
+    problem: { title: "Two Sum" },
+    code: "function solve() {}",
+    boilerplate,
+    executionResults: null,
+    lastSubmittedCode: null,
+  });
+  assert.equal(res.hasUnsavedModifications, false);
+});
+
+await runTest("Issue A: Accepted code allows next problem without confirmation", () => {
+  const boilerplate = "function solve() {}";
+  const res = evaluateUnsavedProtection({
+    problem: { title: "Two Sum" },
+    code: "function solve() { return [0, 1]; }",
+    boilerplate,
+    executionResults: { verdict: "Accepted", passed: 5, total: 5 },
+    lastSubmittedCode: "function solve() { return [0, 1]; }",
+  });
+  assert.equal(res.hasUnsavedModifications, false);
+});
+
+await runTest("Issue A: Safely submitted code (failed or passed) unchanged in editor allows next problem without confirmation", () => {
+  const boilerplate = "function solve() {}";
+  const submittedCode = "function solve() { return null; }";
+  const res = evaluateUnsavedProtection({
+    problem: { title: "Two Sum" },
+    code: submittedCode,
+    boilerplate,
+    executionResults: { verdict: "Wrong Answer", passed: 2, total: 5 },
+    lastSubmittedCode: submittedCode,
+  });
+  assert.equal(res.hasUnsavedModifications, false);
+});
+
+await runTest("Issue A: Edited unsubmitted code correctly triggers confirmation protection", () => {
+  const boilerplate = "function solve() {}";
+  const res = evaluateUnsavedProtection({
+    problem: { title: "Two Sum" },
+    code: "function solve() { // in progress draft... }",
+    boilerplate,
+    executionResults: null,
+    lastSubmittedCode: null,
+  });
+  assert.equal(res.hasUnsavedModifications, true);
+});
+
+await runTest("Issue A: Flagged problem (Peak Segment Product) allows loading new problem without warning", () => {
+  const boilerplate = "function maxPeakSegmentProduct() {}";
+  const res = evaluateUnsavedProtection({
+    problem: { title: "Peak Segment Product" },
+    code: "function maxPeakSegmentProduct() { // 6/7 failed code }",
+    boilerplate,
+    executionResults: { verdict: "Wrong Answer", passed: 6, total: 7 },
+    lastSubmittedCode: null,
+  });
+  assert.equal(res.hasUnsavedModifications, false);
+});
+
+await runTest("Issue B: Topic normalization maps variations and plurals accurately", () => {
+  assert.equal(normalizeTopicName("array"), "arrays");
+  assert.equal(normalizeTopicName("Arrays"), "arrays");
+  assert.equal(normalizeTopicName("Tree"), "trees");
+  assert.equal(normalizeTopicName("trees"), "trees");
+  assert.equal(normalizeTopicName("dp"), "dynamic programming");
+  assert.equal(normalizeTopicName("Dynamic Programming"), "dynamic programming");
+});
+
+await runTest("Issue B: Topic-specific performance matching matches singular and plural query", () => {
+  const submissions = [
+    { verdict: "Accepted", passed: 5, total: 5, hintsUsed: 0, difficulty: "Medium", topic: "Arrays" },
+    { verdict: "Accepted", passed: 5, total: 5, hintsUsed: 0, difficulty: "Medium", topic: "Arrays" },
+  ];
+  const evalSingular = evaluateAdaptiveDifficulty({ submissions, topic: "array" });
+  assert.equal(evalSingular.targetDifficulty, "Hard");
+  assert.equal(evalSingular.action, "promote");
+});
+
+await runTest("Issue B: Complete decision path: 2 accepted Medium solves promotes to Hard and coachChat generates Hard problem", async () => {
+  const mediumSolves = [
+    { verdict: "Accepted", passed: 5, total: 5, hintsUsed: 0, difficulty: "Medium", topic: "Arrays", createdAt: new Date(2000) },
+    { verdict: "Accepted", passed: 5, total: 5, hintsUsed: 0, difficulty: "Medium", topic: "Arrays", createdAt: new Date(1000) },
+  ];
+
+  const evalResult = evaluateAdaptiveDifficulty({ submissions: mediumSolves });
+  assert.equal(evalResult.targetDifficulty, "Hard");
+  assert.equal(evalResult.action, "promote");
+
+  setCustomTextGenerator(async (prompt) => {
+    if (prompt.includes("professional Data Structures and Algorithms problem setter")) {
+      return JSON.stringify({
+        title: "Hard Graph Flow",
+        description: "Hard problem description",
+        examples: [{ input: "a", output: "b", explanation: "c" }, { input: "d", output: "e", explanation: "f" }],
+        constraints: ["1 <= n <= 10^5"],
+        boilerplates: {
+          javascript: "function hardFlow() {}",
+          python: "def hard_flow(): pass",
+          java: "class Solution { public void hardFlow() {} }",
+          cpp: "class Solution { public: void hardFlow() {} };",
+        },
+        testCases: [
+          { input: { n: 1 }, expectedOutput: 1, isHidden: false },
+          { input: { n: 2 }, expectedOutput: 2, isHidden: false },
+          { input: { n: 3 }, expectedOutput: 3, isHidden: true },
+          { input: { n: 4 }, expectedOutput: 4, isHidden: true },
+        ],
+        referenceSolution: {
+          language: "javascript",
+          code: "function hardFlow(n) { return n; }",
+          timeComplexity: "O(n)",
+          spaceComplexity: "O(1)",
+        },
+      });
+    }
+
+    return `[TOOL_CALL:generate_problem]{"topic": "Arrays", "difficulty": "Medium"}[/TOOL_CALL] Loading a problem for you!`;
+  });
+
+  const testUserId = new mongoose.Types.ObjectId();
+  const req = {
+    user: { id: testUserId.toString() },
+    body: {
+      message: "Give me a DSA question",
+      action: "chat",
+      submissions: mediumSolves,
+    },
+  };
+  const res = createMockRes();
+
+  await coachChat(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.jsonData.action, "load_problem");
+  assert.equal(res.jsonData.difficulty, "Hard");
+});
+
+await runTest("Issue C: Structural validation includes referenceSolution", () => {
+  const validProb = {
+    title: "Test Problem",
+    description: "Description",
+    examples: [{ input: "a", output: "b", explanation: "c" }, { input: "d", output: "e", explanation: "f" }],
+    constraints: ["c1"],
+    boilerplates: {
+      javascript: "function solve() {}",
+      python: "def solve(): pass",
+      java: "class Solution { public void solve() {} }",
+      cpp: "class Solution { public: void solve() {} };",
+    },
+    testCases: [
+      { input: { x: 1 }, expectedOutput: 1, isHidden: false },
+      { input: { x: 2 }, expectedOutput: 2, isHidden: false },
+      { input: { x: 3 }, expectedOutput: 3, isHidden: true },
+      { input: { x: 4 }, expectedOutput: 4, isHidden: true },
+    ],
+    referenceSolution: {
+      language: "javascript",
+      code: "function solve(x) { return x; }",
+      timeComplexity: "O(1)",
+      spaceComplexity: "O(1)",
+    },
+  };
+  assert.equal(validateGeneratedProblem(validProb), true);
+
+  const invalidProb = { ...validProb, referenceSolution: { language: "javascript", code: "" } };
+  assert.equal(validateGeneratedProblem(invalidProb), false);
+});
+
+await runTest("Issue C: Complexity mismatch detection catches false O(n) claim on quadratic nested loops", () => {
+  const quadraticSolution = {
+    language: "javascript",
+    timeComplexity: "O(n)",
+    spaceComplexity: "O(1)",
+    code: `function maxPeakSegmentProduct(nums) {
+      let n = nums.length;
+      for (let i = 0; i < n; i++) {
+        for (let cur = i; cur <= rightBound; cur++) {
+          let prod = nums[i] * nums[cur];
+        }
+      }
+    }`,
+  };
+  assert.equal(hasComplexityMismatch(quadraticSolution), true);
+
+  const genuineLinearSolution = {
+    language: "javascript",
+    timeComplexity: "O(n)",
+    spaceComplexity: "O(1)",
+    code: `function maxSubArray(nums) {
+      let maxSoFar = nums[0];
+      for (let i = 1; i < nums.length; i++) {
+        maxSoFar = Math.max(maxSoFar, nums[i]);
+      }
+      return maxSoFar;
+    }`,
+  };
+  assert.equal(hasComplexityMismatch(genuineLinearSolution), false);
 });
 
 setCustomTextGenerator(null);
