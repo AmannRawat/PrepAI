@@ -6,7 +6,9 @@ services:
     build: ./server # Tells Docker to look in the /server folder for the Dockerfile
     container_name: prepai-server
     ports:
-      - "8000:8000" # Maps host port 8000 to container port 8000
+      - "5000:5000" # Maps host port 5000 to container port 5000
+    environment:
+      - PORT=5000 # Ensures Express binds to 5000 inside container regardless of server/.env
     env_file:
       - ./server/.env # Automatically injects your MongoDB URI and API keys!
     restart: unless-stopped # If the server crashes, Docker will try to restart it
@@ -18,7 +20,7 @@ services:
     ports:
       - "5173:5173" # Maps host port 5173 to container port 5173
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=http://localhost:5000
     depends_on:
       - backend # Ensures the backend boots up BEFORE the frontend starts
     restart: unless-stopped

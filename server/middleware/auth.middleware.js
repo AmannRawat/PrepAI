@@ -13,40 +13,51 @@ const authMiddleware = async (req, res, next) => {
             });
         }
 
-        // Retrieve the authenticated user's profile from Clerk.
-        const clerkUser = await clerkClient.users.getUser(userId);
-
-        // Find the primary email address associated with this Clerk account.
-        const primaryEmail = clerkUser.emailAddresses.find(
-            (email) => email.id === clerkUser.primaryEmailAddressId
-        );
-
-        // This application currently requires an email address in its MongoDB User model.
-        // Only use a verified email address when linking an existing account.
-        if (
-            !primaryEmail ||
-            primaryEmail.verification?.status !== "verified"
-        ) {
-            return res.status(403).json({
-                message: "A verified primary email address is required."
-            });
-        }
-
-        const normalizedEmail = primaryEmail.emailAddress
-            .trim()
-            .toLowerCase();
-
-        // First, look for a MongoDB user already linked to this Clerk account.
+        // First, check if an existing application user is already linked to this verified Clerk identity.
         let user = await User.findOne({
             clerkUserId: userId
-        });
+        }).maxTimeMS(3000);
 
         if (!user) {
-            // If this is the user's first Clerk login, look for an existing
-            // MongoDB account with the same verified email address.
+            // New user registration / first login: retrieve profile from Clerk.
+            let clerkUser;
+            try {
+                clerkUser = await clerkClient.users.getUser(userId);
+            } catch (clerkErr) {
+                console.error("Clerk API getUser failed:", clerkErr.message);
+                const isNetworkError =
+                    clerkErr.message?.includes("fetch failed") ||
+                    clerkErr.name === "ClerkAPIResponseError" ||
+                    clerkErr.status >= 500;
+                return res.status(isNetworkError ? 503 : 500).json({
+                    message: "Authentication service temporarily unavailable. Please try again."
+                });
+            }
+
+            // Find the primary email address associated with this Clerk account.
+            const primaryEmail = clerkUser.emailAddresses?.find(
+                (email) => email.id === clerkUser.primaryEmailAddressId
+            );
+
+            // This application currently requires an email address in its MongoDB User model.
+            // Only use a verified email address when linking an existing account.
+            if (
+                !primaryEmail ||
+                primaryEmail.verification?.status !== "verified"
+            ) {
+                return res.status(403).json({
+                    message: "A verified primary email address is required."
+                });
+            }
+
+            const normalizedEmail = primaryEmail.emailAddress
+                .trim()
+                .toLowerCase();
+
+            // Look for an existing MongoDB account with the same verified email address.
             user = await User.findOne({
                 email: normalizedEmail
-            });
+            }).maxTimeMS(3000);
 
             if (user) {
                 // Never silently associate an account already linked to another
@@ -97,8 +108,19 @@ const authMiddleware = async (req, res, next) => {
     } catch (error) {
         console.error("Clerk authentication error:", error);
 
-        res.status(500).json({
-            message: "Unable to authenticate the request."
+        const isNetworkOrTimeout =
+            error.status === 503 ||
+            error.name === "TimeoutError" ||
+            error.name === "MongooseError" ||
+            error.name === "MongoNetworkError" ||
+            error.name === "MongoServerSelectionError" ||
+            Boolean(error.name && error.name.includes("Mongo")) ||
+            /timed? out|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|closed|reset/i.test(error.message || "");
+
+        res.status(isNetworkOrTimeout ? 503 : 500).json({
+            message: isNetworkOrTimeout
+                ? "Authentication service temporarily unavailable. Please try again."
+                : "Unable to authenticate the request."
         });
     }
 };

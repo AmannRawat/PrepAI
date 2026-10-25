@@ -35,14 +35,21 @@ class MemoryExtractionResponse(BaseModel):
 class StartInterviewRequest(BaseModel):
     session_id: str
     user_id: str
-    document_id: str
+    document_id: str | None = ""
 
     target_role: str | None = None
     target_company: str | None = None
+    interview_type: str | None = "Behavioral"
+    difficulty: str | None = "Medium"
+    stage_plan: list[str] | None = None
+    current_stage_index: int | None = 0
+    experience_level: str | None = "fresher"
+    years_of_experience: str | int | float | None = None
+    focus_areas: str | None = ""
 
     memory_context: str = ""
 
-    first_question: str
+    first_question: str | None = None
 
 
 class InterviewAnswerRequest(BaseModel):

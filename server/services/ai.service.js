@@ -1,6 +1,9 @@
 const AI_SERVICE_URL =
   process.env.AI_SERVICE_URL || "http://localhost:9000";
 
+export const AI_SERVICE_TIMEOUT_MS =
+  parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 120000;
+
 export async function uploadResume(file) {
   const formData = new FormData();
 
@@ -142,6 +145,7 @@ export async function startInterview(data) {
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(data),
+            signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
         }
     );
 
@@ -171,6 +175,7 @@ export async function submitInterviewAnswer(
             body: JSON.stringify({
                 answer,
             }),
+            signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
         }
     );
 

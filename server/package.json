@@ -4,7 +4,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "node test-study-plan-analytics.js && node test-resume-reviewer.js && node test-company-catalog.js && node test-adaptive-difficulty.js",
+    "test": "node test-study-plan-analytics.js && node test-resume-reviewer.js && node test-company-catalog.js && node test-adaptive-difficulty.js && node test-problem-deduplication.js && node test-incident-resilience.js && node test-generation-reliability.js && node test-hybrid-generation.js && node test-debug-flow.js && node test-correctness-evaluation.js && node test-interview-langgraph.js",
     "sync:questions": "node scripts/syncCompanyQuestions.js",
     "dev": "nodemon index.js"
   },

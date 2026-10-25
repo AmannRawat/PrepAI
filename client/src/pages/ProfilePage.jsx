@@ -321,7 +321,7 @@ const ProfilePage = () => {
 
             <div className="bg-background/50 p-4 rounded-lg border border-text-secondary/10">
 
-              <MessageSquare className="text-purple-400 mb-2" />
+              <MessageSquare className="text-cyan-400 mb-2" />
 
               <h3 className="font-bold">Chat History</h3>
 
@@ -400,7 +400,7 @@ const ProfilePage = () => {
             {/* High-Level DSA & Interview Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-surface/70 p-4 rounded-xl border border-text-secondary/10 flex items-center gap-3">
-                <div className="p-2.5 rounded-lg bg-blue-500/10 text-blue-400">
+                <div className="p-2.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
                   <Target size={20} />
                 </div>
                 <div>
@@ -412,7 +412,7 @@ const ProfilePage = () => {
               </div>
 
               <div className="bg-surface/70 p-4 rounded-xl border border-text-secondary/10 flex items-center gap-3">
-                <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-400">
+                <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                   <CheckCircle2 size={20} />
                 </div>
                 <div>
@@ -424,7 +424,7 @@ const ProfilePage = () => {
               </div>
 
               <div className="bg-surface/70 p-4 rounded-xl border border-text-secondary/10 flex items-center gap-3">
-                <div className="p-2.5 rounded-lg bg-purple-500/10 text-purple-400">
+                <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
                   <Award size={20} />
                 </div>
                 <div>
@@ -436,7 +436,7 @@ const ProfilePage = () => {
               </div>
 
               <div className="bg-surface/70 p-4 rounded-xl border border-text-secondary/10 flex items-center gap-3">
-                <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-400">
+                <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
                   <Flame size={20} />
                 </div>
                 <div>

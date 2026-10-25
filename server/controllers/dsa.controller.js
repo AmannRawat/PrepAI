@@ -3,9 +3,10 @@ import DsaSubmission from "../models/DsaSubmission.model.js";
 import UserMemory from "../models/UserMemory.model.js";
 import StudyPlan from "../models/StudyPlan.model.js";
 import { calculateDsaStats } from "../services/analytics.service.js";
+import vm from "node:vm";
 import { generateText } from "../services/gemini.service.js";
 import { extractJson } from "../utils/extractJson.js";
-import { executeCode } from "../services/codeExecution.service.js";
+import { executeCode, valuesEqual } from "../services/codeExecution.service.js";
 import {
   sanitizeProblemForClient,
   resolveAuthoritativeTestCases,
@@ -21,6 +22,43 @@ import {
   extractExplicitDifficulty,
   ADAPTIVE_DIFFICULTY_CONFIG,
 } from "../services/adaptiveDifficulty.service.js";
+import {
+  selectNextBlueprint,
+  buildCanonicalProblemFromBlueprint,
+  findBlueprintsByTopicAndDifficulty,
+  TOPIC_ROTATION_ORDER,
+  getAvailableTopics,
+  isTopicSupported,
+} from "../services/dsaBlueprints.js";
+
+// In-memory per-user session tracking for topic rotation and pattern diversity
+const userRecentProblems = new Map();
+
+export function recordUserProblemLoad(userId, { blueprintId, topic, title } = {}) {
+  if (!userId) return;
+  let record = userRecentProblems.get(userId);
+  if (!record) {
+    record = { recentBlueprints: [], recentTopics: [], recentTitles: [] };
+    userRecentProblems.set(userId, record);
+  }
+  if (blueprintId && !record.recentBlueprints.includes(blueprintId)) {
+    record.recentBlueprints.push(blueprintId);
+    if (record.recentBlueprints.length > 10) record.recentBlueprints.shift();
+  }
+  if (topic) {
+    record.recentTopics.push(topic.toLowerCase());
+    if (record.recentTopics.length > 10) record.recentTopics.shift();
+  }
+  if (title) {
+    record.recentTitles.push(title.toLowerCase());
+    if (record.recentTitles.length > 10) record.recentTitles.shift();
+  }
+}
+
+export function getUserRecentProblemData(userId) {
+  if (!userId) return { recentBlueprints: [], recentTopics: [], recentTitles: [] };
+  return userRecentProblems.get(userId) || { recentBlueprints: [], recentTopics: [], recentTitles: [] };
+}
 
 /**
  * Extracts requested question count from user message.
@@ -221,10 +259,20 @@ export function validateGeneratedProblem(problem) {
   }
 
   for (const language of supportedLanguages) {
-    if (
-      typeof problem.boilerplates[language] !== "string" ||
-      !problem.boilerplates[language].trim()
-    ) {
+    const code = problem.boilerplates[language];
+    if (typeof code !== "string" || !code.trim()) {
+      return false;
+    }
+    if (language === "javascript" && !/(?:function\b|=>)/.test(code)) {
+      return false;
+    }
+    if (language === "python" && !/\bdef\b/.test(code)) {
+      return false;
+    }
+    if (language === "java" && !/\bclass\s+Solution\b/.test(code)) {
+      return false;
+    }
+    if (language === "cpp" && !/\bclass\s+Solution\b/.test(code)) {
       return false;
     }
   }
@@ -237,6 +285,7 @@ export function validateGeneratedProblem(problem) {
     return false;
   }
 
+  let baselineKeys = null;
   for (const testCase of problem.testCases) {
     if (
       !testCase ||
@@ -251,10 +300,35 @@ export function validateGeneratedProblem(problem) {
       return false;
     }
 
+    // Input must be a non-null plain object representing named function arguments
     if (
-      testCase.input === undefined ||
+      !testCase.input ||
+      typeof testCase.input !== "object" ||
+      Array.isArray(testCase.input) ||
       testCase.expectedOutput === undefined
     ) {
+      return false;
+    }
+
+    // Validate that inputs and expected outputs are JSON-serializable
+    try {
+      const serializedInput = JSON.stringify(testCase.input);
+      const serializedOutput = JSON.stringify(testCase.expectedOutput);
+      if (!serializedInput || serializedOutput === undefined) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+
+    // Ensure all test cases share consistent function parameter keys
+    const currentKeys = Object.keys(testCase.input).sort().join(",");
+    if (!currentKeys) {
+      return false;
+    }
+    if (baselineKeys === null) {
+      baselineKeys = currentKeys;
+    } else if (baselineKeys !== currentKeys) {
       return false;
     }
   }
@@ -267,11 +341,26 @@ export function validateGeneratedProblem(problem) {
     return false;
   }
 
-  if (problem.referenceSolution) {
+  if (problem.referenceSolution !== undefined) {
     if (
+      !problem.referenceSolution ||
       typeof problem.referenceSolution !== "object" ||
       typeof problem.referenceSolution.code !== "string" ||
       !problem.referenceSolution.code.trim()
+    ) {
+      return false;
+    }
+    if (
+      problem.referenceSolution.timeComplexity !== undefined &&
+      (typeof problem.referenceSolution.timeComplexity !== "string" ||
+        !problem.referenceSolution.timeComplexity.trim())
+    ) {
+      return false;
+    }
+    if (
+      problem.referenceSolution.spaceComplexity !== undefined &&
+      (typeof problem.referenceSolution.spaceComplexity !== "string" ||
+        !problem.referenceSolution.spaceComplexity.trim())
     ) {
       return false;
     }
@@ -304,7 +393,107 @@ export function hasComplexityMismatch(referenceSolution) {
   return false;
 }
 
-export async function createDsaProblem({ topic, difficulty }) {
+/**
+ * Deterministically checks that the problem's JavaScript reference solution
+ * executes without runtime errors and produces the exact expectedOutput for every test case.
+ * Runs locally inside an isolated node:vm sandbox with a strict execution deadline (150ms per case).
+ * Completely offline, requiring NO external compiler calls or network dependencies.
+ */
+export function verifyReferenceSolutionMatchesTestCases(problem) {
+  if (
+    !problem ||
+    typeof problem !== "object" ||
+    !problem.referenceSolution ||
+    typeof problem.referenceSolution.code !== "string" ||
+    !problem.referenceSolution.code.trim() ||
+    !Array.isArray(problem.testCases) ||
+    problem.testCases.length === 0
+  ) {
+    return false;
+  }
+
+  const code = problem.referenceSolution.code;
+
+  // Extract primary function name and parameters
+  const fnMatch = code.match(/function\s+([A-Za-z0-9_$]+)\s*\(([^)]*)\)/);
+  let fnName = "";
+  let paramNames = [];
+
+  if (fnMatch) {
+    fnName = fnMatch[1];
+    paramNames = fnMatch[2].split(",").map((s) => s.trim()).filter(Boolean);
+  } else {
+    const arrowMatch = code.match(/(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=\s*(?:function|\(([^)]*)\)\s*=>)/);
+    if (arrowMatch) {
+      fnName = arrowMatch[1];
+      paramNames = (arrowMatch[2] || "").split(",").map((s) => s.trim()).filter(Boolean);
+    }
+  }
+
+  if (!fnName) {
+    return false;
+  }
+
+  let script;
+  try {
+    script = new vm.Script(`
+      ${code}
+      ;(() => {
+        return ${fnName}(...__args);
+      })()
+    `);
+  } catch (err) {
+    console.warn("[Problem Consistency Gate] Reference solution compilation error:", err.message);
+    return false;
+  }
+
+  for (let i = 0; i < problem.testCases.length; i++) {
+    const tc = problem.testCases[i];
+    if (!tc || typeof tc !== "object" || !tc.input || typeof tc.input !== "object") {
+      return false;
+    }
+
+    const inputObj = tc.input;
+    const args =
+      paramNames.length > 0 && paramNames.every((p) => Object.prototype.hasOwnProperty.call(inputObj, p))
+        ? paramNames.map((p) => inputObj[p])
+        : Object.values(inputObj);
+
+    try {
+      const sandbox = {
+        __args: JSON.parse(JSON.stringify(args)),
+        console: { log: () => {}, warn: () => {}, error: () => {} },
+      };
+      const actual = script.runInNewContext(sandbox, { timeout: 150 });
+
+      if (!valuesEqual(actual, tc.expectedOutput)) {
+        console.warn(
+          `[Problem Consistency Gate] Reference solution mismatch on testCase ${i}: expected ${JSON.stringify(
+            tc.expectedOutput
+          )}, got ${JSON.stringify(actual)}`
+        );
+        return false;
+      }
+    } catch (execErr) {
+      console.warn(
+        `[Problem Consistency Gate] Reference solution runtime error on testCase ${i}:`,
+        execErr.message
+      );
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export async function createDsaProblem({
+  topic,
+  difficulty,
+  excludeTitle,
+  allowFallback = false,
+  recentTitles = [],
+  recentBlueprints = [],
+}) {
   const allowedDifficulties = ["Easy", "Medium", "Hard"];
   const matchedDifficulty =
     allowedDifficulties.find(
@@ -316,6 +505,26 @@ export async function createDsaProblem({ topic, difficulty }) {
     normalizedTopic = "Arrays";
   }
 
+  // Treat generic intents ("Any", "Mixed", "DSA", "coding", "practice") as Arrays
+  const isGeneric = [
+    "any",
+    "mixed",
+    "dsa",
+    "coding",
+    "algo",
+    "algorithm",
+    "algorithms",
+    "practice",
+  ].includes(normalizedTopic.toLowerCase());
+  if (isGeneric) {
+    normalizedTopic = "Arrays";
+  }
+
+  const trimmedExclude = typeof excludeTitle === "string" ? excludeTitle.trim() : "";
+  const exclusionDirective = trimmedExclude
+    ? `\nCRITICAL DEDUPLICATION REQUIREMENT:\nDo NOT generate, reproduce, or title this problem "${trimmedExclude}". Generate a completely different problem with a distinct algorithmic task, title, and function name.\n`
+    : "";
+
   const prompt = `
 You are a professional Data Structures and Algorithms problem setter
 for a programming interview practice platform.
@@ -324,7 +533,7 @@ Generate ONE original, self-contained function-based DSA problem.
 
 TOPIC: ${normalizedTopic}
 DIFFICULTY: ${matchedDifficulty}
-
+${exclusionDirective}
 PROBLEM REQUIREMENTS:
 1. Generate a clear title and an unambiguous problem description.
 2. Include at least two valid examples, each with input, output and explanation.
@@ -337,6 +546,8 @@ PROBLEM REQUIREMENTS:
 8. Define exactly one primary function or method signature.
 9. All four languages must represent the same algorithmic interface.
 10. Do not put the solution or its algorithm explanation in the description.
+11. Every test case input must strictly satisfy all stated constraints (array lengths, value bounds).
+12. The JavaScript reference solution must be fully correct, match the stated problem, and handle all boundary conditions.
 
 FUNCTION INTERFACE:
 - JavaScript: a named function that returns the answer.
@@ -352,24 +563,28 @@ FUNCTION INTERFACE:
 - Do not use custom data structures unless their interface is fully defined.
 
 TEST CASE REQUIREMENTS:
-1. Generate between 4 and 6 test cases (2 visible, 2 to 4 hidden).
+1. Generate between 6 and 10 test cases.
 2. Every test case must contain:
    - input: an object whose keys match the function parameters.
    - expectedOutput: the exact expected return value.
    - isHidden: a boolean.
-3. Include at least two visible cases and at least two hidden cases.
+3. Include at least two visible cases and at least three hidden cases.
 4. Cover normal cases, boundary cases and relevant edge cases.
-5. Every expectedOutput MUST be 100% mathematically correct and identical to what referenceSolution returns.
-6. Use exact raw data types for expectedOutput: if the function returns a number, use a raw JSON number (e.g. 42, not "42"); if a boolean, use a raw JSON boolean (true/false, not "true"); if an array, use a raw JSON array (e.g. [1, 2], not "[1, 2]").
-7. Test inputs and expected outputs must be JSON-serializable.
-8. Do not use undefined, NaN, Infinity, functions, or language-specific objects.
-9. Every test case must match the same function signature.
-10. Do not make hidden test cases visible in the problem description or examples.
+5. Ensure each expectedOutput is mathematically correct for its input.
+   CRITICAL MATHEMATICAL CONSISTENCY:
+   - Your reference solution MUST execute and compute the EXACT expectedOutput for EVERY test case and example.
+   - Do NOT guess, approximate, or output off-by-one values.
+   - If the problem defines a condition over ANY pair of elements (e.g. at most k elements strictly between occurrences), you MUST evaluate all valid pairs according to that exact mathematical rule, not merely adjacent pairs.
+6. Test inputs and expected outputs must be JSON-serializable.
+7. Do not use undefined, NaN, Infinity, functions, or language-specific objects.
+8. Every test case must match the same function signature.
+9. Do not make hidden test cases visible in the problem description or examples.
+10. Examples must agree with their corresponding visible test cases.
 
 BOILERPLATES:
 - Provide valid starter code for JavaScript, Python, Java and C++.
 - Include the function or method signature and a placeholder body.
-- Do not include a complete solution in boilerplates.
+- Do not include a complete solution.
 - Use the exact same logical parameter names and return behavior in all languages.
 - Java and C++ must use class Solution.
 - Avoid unsupported or ambiguous types.
@@ -377,9 +592,9 @@ BOILERPLATES:
 REFERENCE SOLUTION:
 - Provide a complete, fully working reference solution in JavaScript.
 - The reference solution MUST implement the exact same function name and parameters as boilerplates.javascript.
-- The primary function must be declared first. Do not declare helper functions before the primary function.
-- The function must directly return the answer (not in-place void mutation).
-- It must pass EVERY test case in testCases without any errors.
+- The primary function must be declared first.
+- The function must directly return the answer.
+- The reference solution MUST execute cleanly and pass 100% of the generated test cases. If referenceSolution(input) !== expectedOutput on ANY test case, the problem is rejected.
 - Time Complexity: State the honest asymptotic time complexity (e.g. O(n), O(n log n)).
   CRITICAL: Do NOT claim O(n) or O(1) complexity if your implementation contains nested loops or quadratic operations.
 - Space Complexity: State the true space complexity (e.g. O(1), O(n)).
@@ -444,7 +659,7 @@ FINAL SELF-CHECK:
 - JSON syntax is valid.
 - Every test case input has the correct parameters.
 - All expected outputs match the problem's intended behavior and reference solution.
-- At least two test cases are visible and at least two are hidden.
+- At least two test cases are visible and at least three are hidden.
 - Reference solution compiles and passes every test case.
 - No false complexity claims.
 `;
@@ -452,59 +667,108 @@ FINAL SELF-CHECK:
   let problem = null;
   let lastError = null;
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const responseText = await generateText(prompt);
+      const responseText = await generateText(prompt, {
+        stage: "problem_generation",
+        timeout: 25000,
+        maxAttempts: 1,
+      });
       const parsed = extractJson(responseText);
 
       if (!validateGeneratedProblem(parsed)) {
         throw new Error("Generated problem failed structural validation.");
       }
 
-      // Check complexity claim honesty
-      if (parsed.referenceSolution && hasComplexityMismatch(parsed.referenceSolution)) {
-        console.warn("[Problem Validation Gate] Correcting complexity claim: solution contains nested loops but claimed O(n) or O(1).");
-        parsed.referenceSolution.timeComplexity = "O(n^2)";
+      if (!verifyReferenceSolutionMatchesTestCases(parsed)) {
+        throw new Error(
+          "Generated problem failed consistency validation (reference solution contradicts test cases)."
+        );
       }
 
-      // Validation Gate: Execute reference solution against every test case using the platform's evaluator
-      if (parsed.referenceSolution?.code && process.env.ONLINECOMPILER_API_KEY) {
-        try {
-          const validationResult = await executeCode({
-            code: parsed.referenceSolution.code,
-            language: "javascript",
-            testCases: parsed.testCases,
-            isRunCode: false,
-          });
+      // Check deduplication against excluded title
+      if (
+        trimmedExclude &&
+        parsed.title &&
+        parsed.title.trim().toLowerCase() === trimmedExclude.toLowerCase()
+      ) {
+        throw new Error(
+          `Duplicate problem title generated: "${parsed.title}" matches current problem`
+        );
+      }
 
-          if (validationResult.verdict !== "Accepted" || validationResult.passed !== parsed.testCases.length) {
-            console.error(`[Problem Validation Gate] Reference solution failed test cases: verdict '${validationResult.verdict}', passed ${validationResult.passed}/${parsed.testCases.length}.`);
-            throw new Error(
-              `Reference solution failed validation: verdict '${validationResult.verdict}' (${validationResult.passed}/${parsed.testCases.length} test cases passed).`
-            );
-          }
-        } catch (gateErr) {
-          if (gateErr.message && gateErr.message.includes("Reference solution failed validation")) {
-            throw gateErr;
-          }
-          console.warn("[Problem Validation Gate] Execution check encountered non-fatal provider issue:", gateErr.message);
-        }
+      // Check complexity claim honesty
+      if (parsed.referenceSolution && hasComplexityMismatch(parsed.referenceSolution)) {
+        console.warn(
+          "[Problem Validation Gate] Correcting complexity claim: solution contains nested loops but claimed O(n) or O(1)."
+        );
+        parsed.referenceSolution.timeComplexity = "O(n^2)";
       }
 
       problem = parsed;
       break;
     } catch (err) {
       lastError = err;
-      console.warn(`Problem generation attempt ${attempt} failed validation gate:`, err.message);
+      console.warn(`Problem generation attempt ${attempt} failed:`, err.message);
+
+      const isTransport =
+        err.name === "AbortError" ||
+        err.name === "TimeoutError" ||
+        /fetch failed|aborted|ETIMEDOUT|ECONNRESET/i.test(err.message || "");
+      if (isTransport) {
+        break;
+      }
     }
   }
 
   if (!problem) {
+    if (allowFallback) {
+      if (!isTopicSupported(normalizedTopic)) {
+        const available = getAvailableTopics().join(", ");
+        throw new Error(
+          `Practice problems for topic "${normalizedTopic}" are not available in our library. Available topics: ${available}.`
+        );
+      }
+
+      try {
+        const blueprint = selectNextBlueprint({
+          requestedTopic: normalizedTopic,
+          requestedDifficulty: matchedDifficulty,
+          excludeTitles: [trimmedExclude, ...recentTitles].filter(Boolean),
+          recentBlueprintIds: recentBlueprints,
+        });
+
+        if (blueprint) {
+          console.warn(
+            `[Problem Generation] Candidate generation failed (${lastError?.message}). Recovering with verified blueprint '${blueprint.title}'.`
+          );
+          const canonicalProblem = buildCanonicalProblemFromBlueprint(blueprint);
+          const clientSafeProblem = sanitizeProblemForClient(canonicalProblem);
+          clientSafeProblem.difficulty = blueprint.difficulty;
+          clientSafeProblem.topic = blueprint.topic;
+          if (canonicalProblem.referenceSolution) {
+            clientSafeProblem.referenceSolution = canonicalProblem.referenceSolution;
+          }
+          return {
+            problem: clientSafeProblem,
+            topic: blueprint.topic,
+            difficulty: blueprint.difficulty,
+            isFallback: true,
+            fallbackReason: lastError?.message || "Verified blueprint fallback loaded",
+            blueprintId: blueprint.id,
+          };
+        }
+      } catch (bpErr) {
+        if (bpErr.message && bpErr.message.includes("not available")) {
+          throw bpErr;
+        }
+        console.warn("Blueprint fallback selection encountered issue:", bpErr.message);
+      }
+    }
+
     console.error("Invalid generated DSA problem:", lastError);
     throw new Error(
-      lastError?.message && lastError.message.includes("Reference solution failed")
-        ? lastError.message
-        : "The AI generated an invalid problem. Please try again."
+      lastError?.message || "The AI generated an invalid problem. Please try again."
     );
   }
 
@@ -520,6 +784,7 @@ FINAL SELF-CHECK:
     problem: clientSafeProblem,
     topic: normalizedTopic,
     difficulty: matchedDifficulty,
+    isFallback: false,
   };
 }
 
@@ -531,13 +796,13 @@ export async function generateProblem(req, res) {
       });
     }
 
-    let { topic, difficulty } = req.body;
+    let { topic, difficulty, excludeTitle, currentTitle, recentTitles } = req.body;
 
     const allowedDifficulties = ["Easy", "Medium", "Hard"];
 
-    let normalizedTopic = String(topic || "Arrays").trim();
+    let normalizedTopic = String(topic || "Any").trim();
     if (!normalizedTopic || normalizedTopic.length > 100) {
-      normalizedTopic = "Arrays";
+      normalizedTopic = "Any";
     }
 
     if (!difficulty || !allowedDifficulties.includes(difficulty)) {
@@ -547,15 +812,47 @@ export async function generateProblem(req, res) {
       }
       const adaptive = evaluateAdaptiveDifficulty({
         submissions: userSubmissions,
-        topic: normalizedTopic,
+        topic: normalizedTopic === "Any" ? "Arrays" : normalizedTopic,
       });
       difficulty = adaptive.targetDifficulty;
     }
 
-    const result = await createDsaProblem({ topic: normalizedTopic, difficulty });
+    const effectiveExclude = excludeTitle || currentTitle || null;
+    const userHistory = getUserRecentProblemData(req.user.id);
+    const combinedRecentTitles = Array.from(
+      new Set(
+        [
+          effectiveExclude,
+          ...(Array.isArray(recentTitles) ? recentTitles : []),
+          ...userHistory.recentTitles,
+        ].filter(Boolean)
+      )
+    );
+
+    const result = await createDsaProblem({
+      topic: normalizedTopic,
+      difficulty,
+      excludeTitle: effectiveExclude,
+      allowFallback: true,
+      recentTitles: combinedRecentTitles,
+      recentBlueprints: userHistory.recentBlueprints,
+    });
+
+    recordUserProblemLoad(req.user.id, {
+      blueprintId: result.blueprintId,
+      topic: result.topic,
+      title: result.problem.title,
+    });
+
     return res.status(200).json(result.problem);
   } catch (error) {
     console.error("Error generating problem:", error);
+
+    if (error.message && error.message.includes("not available")) {
+      return res.status(404).json({
+        error: error.message,
+      });
+    }
 
     if (error.message && error.message.includes("invalid problem")) {
       return res.status(502).json({
@@ -563,8 +860,15 @@ export async function generateProblem(req, res) {
       });
     }
 
-    return res.status(500).json({
-      error: "Failed to generate problem. Please try again.",
+    const isNetworkOrTimeout =
+      error.status === 503 ||
+      error.name === "TimeoutError" ||
+      /timed? out|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(error.message || "");
+
+    return res.status(isNetworkOrTimeout ? 503 : 500).json({
+      error: isNetworkOrTimeout
+        ? "Problem generation service is temporarily unavailable. Please try again shortly."
+        : error.message || "Failed to generate problem. Please try again.",
     });
   }
 }
@@ -767,7 +1071,7 @@ Return only one valid JSON object:
 }
 `;
 
-      const responseText = await generateText(prompt);
+      const responseText = await generateText(prompt, { stage: "code_review" });
       const parsed = extractJson(responseText);
 
       if (
@@ -884,9 +1188,9 @@ function validateCoachInput(req, res) {
 }
 
 
-async function generateCoachResponse(res, prompt) {
+async function generateCoachResponse(res, prompt, stage = "coach_response") {
   try {
-    const answer = await generateText(prompt);
+    const answer = await generateText(prompt, { stage });
 
     if (!answer || !answer.trim()) {
       return res.status(502).json({
@@ -1063,6 +1367,155 @@ Return only the formatted Markdown response.
 }
 
 /**
+ * Wraps a promise with a client-side timeout to prevent hanging on stalled network/driver calls.
+ * Ensures that timers are cleaned up immediately when the promise settles.
+ */
+export function withBoundedTimeout(promise, ms = 3000, operationName = "Operation") {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`${operationName} timed out after ${ms}ms`);
+      err.name = "TimeoutError";
+      reject(err);
+    }, ms);
+  });
+
+  return Promise.race([
+    Promise.resolve(promise),
+    timeoutPromise,
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/**
+ * Detects unambiguous user requests to create or load a new DSA problem in the Arena
+ * (e.g., "give me a new problem", "another problem", "next question", "generate an easy array problem").
+ * Excludes conversational queries, company-catalog inquiries, and coaching requests (hints, solutions, approach).
+ */
+export function isUnambiguousProblemRequest(message, action = "chat", isCompanyCatalogRequest = false) {
+  if (action !== "chat" || isCompanyCatalogRequest) {
+    return false;
+  }
+
+  const text = String(message || "").trim();
+  if (!text) return false;
+
+  // If the user is asking for hints, approaches, explanations, solutions, or debugging of an existing problem
+  if (/\b(?:hint|approach|solution|explain|explanation|clue|answer|review|fix|bug|test case|debug)\b/i.test(text)) {
+    return false;
+  }
+
+  // Quick follow-ups: "another problem", "next problem", "next question", "another problem, please"
+  if (/^(?:please\s+)?(?:another|next|new)\s+(?:problem|question)(?:[,\s]+please)?[.!?]?$/i.test(text)) {
+    return true;
+  }
+
+  // Explicit creation/generation request:
+  // "give me a new problem", "generate a hard tree problem", "create another question", "give me a problem"
+  if (/\b(?:give me|generate|create|load)\s+(?:a|an|another|the|next)?\s*(?:new\s+)?(?:easy|medium|hard)?\s*[\w\s]*?(?:problem|question)\b/i.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Loads a newly created DSA problem and generates Pepe's confirmation message.
+ * Shared between direct generation requests and conversational tool calls.
+ */
+async function loadAndConfirmDsaProblem({
+  targetTopic,
+  targetDifficulty,
+  trimmedMessage,
+  detectedCompany,
+  updatedProfile,
+  adaptiveAssessment,
+  problem,
+  res,
+  userId,
+}) {
+  try {
+    const userHistory = getUserRecentProblemData(userId);
+    const combinedRecentTitles = Array.from(
+      new Set([problem?.title, ...userHistory.recentTitles].filter(Boolean))
+    );
+
+    const result = await createDsaProblem({
+      topic: targetTopic,
+      difficulty: targetDifficulty,
+      excludeTitle: problem?.title,
+      allowFallback: true,
+      recentTitles: combinedRecentTitles,
+      recentBlueprints: userHistory.recentBlueprints,
+    });
+
+    recordUserProblemLoad(userId, {
+      blueprintId: result.blueprintId,
+      topic: result.topic,
+      title: result.problem.title,
+    });
+
+    const isHinglish = /\b(bhai|karo|do|kuch|sawaal|chahiye|agla|naya|dikhao|batao|khel|shuru|problem)\b/i.test(trimmedMessage || "");
+    const reasonText = adaptiveAssessment?.reason ? `(${adaptiveAssessment.reason})` : "";
+
+    let confirmationAnswer = "";
+    if (result.isFallback) {
+      confirmationAnswer = isHinglish
+        ? `Live variation me validation delay tha, toh aapki practice smooth rakhne ke liye maine verified problem **"${result.problem.title}"** [${result.difficulty} • ${result.topic}] DSA Arena me load kar diya hai! ${reasonText} Shuru ho jao, aur hint chahiye ho toh batao!`
+        : `To guarantee 100% test accuracy and uninterrupted practice, I've loaded our verified practice problem **"${result.problem.title}"** [${result.difficulty} • ${result.topic}] into your DSA Arena. ${reasonText} Give it your best shot, and ask me whenever you need a hint!`;
+    } else {
+      confirmationAnswer = isHinglish
+        ? `Maine aapke DSA Arena me ek naya practice problem load kar diya hai: **"${result.problem.title}"** [${result.difficulty} • ${result.topic}]! ${reasonText} Code likhna shuru karo, Pepe bhai hamesha saath hai!`
+        : `I've generated a fresh practice problem **"${result.problem.title}"** [${result.difficulty} • ${result.topic}] and loaded it into your DSA Arena. ${reasonText} Try solving it, and ask me for a hint whenever you need one!`;
+    }
+
+    confirmationAnswer = sanitizeAiProblemConfirmation(
+      confirmationAnswer,
+      result,
+      detectedCompany
+    );
+
+    return res.status(200).json({
+      answer: confirmationAnswer,
+      action: "load_problem",
+      problem: result.problem,
+      topic: result.topic,
+      difficulty: result.difficulty,
+      isFallback: Boolean(result.isFallback),
+      blueprintId: result.blueprintId,
+      onboardingProfile: updatedProfile,
+      adaptiveAssessment: {
+        currentDifficulty: adaptiveAssessment?.currentDifficulty || "Medium",
+        targetDifficulty: result.difficulty,
+        action: adaptiveAssessment?.action || "maintain",
+        reason: adaptiveAssessment?.reason || "Practicing at standard difficulty.",
+        isExplicit: Boolean(adaptiveAssessment?.isExplicit),
+      },
+    });
+  } catch (err) {
+    console.error("Execution failed for createDsaProblem:", err);
+    let errorAnswer = `I tried to generate a ${targetDifficulty} ${targetTopic} problem for your DSA Arena, but encountered an error: ${err.message}. Please try asking again.`;
+    if (err.message && err.message.includes("not available")) {
+      const available = getAvailableTopics().join(", ");
+      errorAnswer = `Currently, practice problems for **${targetTopic}** are not available in our verified library. You can practice with any of these topics: **${available}**! Which one would you like to try?`;
+    }
+    return res.status(200).json({
+      answer: errorAnswer,
+      action: "chat",
+      onboardingProfile: updatedProfile,
+      adaptiveAssessment: {
+        currentDifficulty: adaptiveAssessment?.currentDifficulty || "Medium",
+        targetDifficulty: targetDifficulty || "Medium",
+        action: adaptiveAssessment?.action || "maintain",
+        reason: adaptiveAssessment?.reason || "Practicing at standard difficulty.",
+        isExplicit: Boolean(adaptiveAssessment?.isExplicit),
+      },
+    });
+  }
+}
+
+/**
  * Unified multi-turn conversational chat, onboarding, study plan generation,
  * progressive coaching, and failed-test debugging for Pepe AI Coach.
  */
@@ -1086,6 +1539,7 @@ export async function coachChat(req, res) {
       onboardingProfile = null,
       plan = null,
       execution = null,
+      evaluationError = null,
     } = req.body;
 
     const trimmedMessage = String(message || "").trim();
@@ -1096,6 +1550,16 @@ export async function coachChat(req, res) {
       });
     }
 
+    // Auto-detect debugging intent if action was sent as general chat but user specifically asks to debug failing code
+    let effectiveAction = action;
+    const isExplicitDebugMessage =
+      /\b(?:debug|why did my (?:code|test|submission) fail|why is my (?:code|solution) (?:wrong|failing)|where is the bug|what is wrong with my code)\b/i.test(
+        trimmedMessage
+      );
+    if (effectiveAction === "chat" && (execution || evaluationError) && isExplicitDebugMessage) {
+      effectiveAction = "debug";
+    }
+
     const userId = req.user?.id;
     let activeProfile = onboardingProfile;
     let activePlan = plan;
@@ -1103,7 +1567,11 @@ export async function coachChat(req, res) {
     // Load persisted study plan if client didn't supply full profile/plan
     if (userId && mongoose.Types.ObjectId.isValid(userId) && mongoose.connection.readyState === 1) {
       try {
-        const persistedDoc = await StudyPlan.findOne({ user: userId });
+        const persistedDoc = await withBoundedTimeout(
+          StudyPlan.findOne({ user: userId }).maxTimeMS(3000),
+          3000,
+          "StudyPlan.findOne"
+        );
         if (!activeProfile && persistedDoc?.onboardingProfile) {
           activeProfile = persistedDoc.onboardingProfile;
         }
@@ -1120,7 +1588,11 @@ export async function coachChat(req, res) {
     let userSubmissionsList = [];
     if (userId && mongoose.Types.ObjectId.isValid(userId) && mongoose.connection.readyState === 1) {
       try {
-        const userSubmissions = await DsaSubmission.find({ user: userId });
+        const userSubmissions = await withBoundedTimeout(
+          DsaSubmission.find({ user: userId }).maxTimeMS(3000),
+          3000,
+          "DsaSubmission.find"
+        );
         userSubmissionsList = userSubmissions;
         userStats = calculateDsaStats(userSubmissions);
       } catch (statsErr) {
@@ -1201,13 +1673,17 @@ export async function coachChat(req, res) {
 
       try {
         if (mongoose.connection.readyState === 1) {
-          companyQuestionsResult = await getCompanyQuestions({
-            company: detectedCompany,
-            difficulty: effectiveCompanyDifficulty,
-            topic: filterTopic,
-            limit: requestedCount,
-            excludeSlugs,
-          });
+          companyQuestionsResult = await withBoundedTimeout(
+            getCompanyQuestions({
+              company: detectedCompany,
+              difficulty: effectiveCompanyDifficulty,
+              topic: filterTopic,
+              limit: requestedCount,
+              excludeSlugs,
+            }),
+            3000,
+            "getCompanyQuestions"
+          );
         }
       } catch (catErr) {
         console.warn("Failed to retrieve company questions for prompt:", catErr.message);
@@ -1226,6 +1702,55 @@ export async function coachChat(req, res) {
       Boolean(detectedCompany) &&
       !isExplicitAiGenRequest &&
       isCompanyQuestionQuery;
+
+    let updatedProfile = onboardingProfile ? { ...onboardingProfile } : null;
+
+    // Finding 2: Direct routing for unambiguous problem generation requests
+    // (e.g. "give me a new problem", "another problem, please", "next question", "generate an easy array problem")
+    // Avoids an unnecessary multi-second general conversational LLM call before problem creation.
+    const isDirectProblemRequest = isUnambiguousProblemRequest(
+      trimmedMessage,
+      effectiveAction,
+      isCompanyCatalogRequest
+    );
+
+    if (isDirectProblemRequest) {
+      let extractedTopic = filterTopic;
+      if (!extractedTopic) {
+        const topicMatch = trimmedMessage.match(
+          /\b(array|arrays|string|strings|dynamic programming|dp|tree|trees|graph|graphs|binary search|hash table|hash map|two pointers|stack|queue|recursion|greedy|heap|linked list|trie|tries|bit manipulation|segment tree|disjoint set|union find)\b/i
+        );
+        if (topicMatch) {
+          extractedTopic = topicMatch[1];
+        } else {
+          const generalMatch = trimmedMessage.match(/\b(?:give me|load|generate)\s+(?:an?|the)?\s*(?:new\s+)?(?:easy|medium|hard)?\s*([a-zA-Z\s]+?)\s*(?:problem|question)\b/i);
+          if (generalMatch && generalMatch[1].trim()) {
+            const candidateTopic = generalMatch[1].trim().toLowerCase();
+            if (!["dsa", "coding", "practice", "programming", "algo", "algorithm", "good", "next", "another", "new"].includes(candidateTopic)) {
+              extractedTopic = generalMatch[1].trim();
+            }
+          }
+        }
+      }
+      const targetTopic = extractedTopic || "Any";
+      const targetDifficulty =
+        explicitDiffFromMsg ||
+        filterDifficulty ||
+        adaptiveAssessment?.targetDifficulty ||
+        "Medium";
+
+      return await loadAndConfirmDsaProblem({
+        targetTopic,
+        targetDifficulty,
+        trimmedMessage,
+        detectedCompany,
+        updatedProfile,
+        adaptiveAssessment,
+        problem,
+        res,
+        userId: req.user?.id,
+      });
+    }
 
     // Build context
     let contextPrompt = `You are Pepe, PrepAI's intelligent, friendly, encouraging, and technically sharp DSA coach.
@@ -1303,23 +1828,45 @@ ${String(code).slice(0, 10000) || "No code written yet."}
     }
 
     // Handle specific actions or construct conversation
-    if (action === "debug") {
+    if (effectiveAction === "debug") {
+      // Normalize execution diagnostics from either execution object or evaluationError string/object
+      let resolvedExecution = execution;
+      if (!resolvedExecution && evaluationError) {
+        resolvedExecution = {
+          verdict: typeof evaluationError === "string" && /syntax|compile|compilation|syntaxerror/i.test(evaluationError)
+            ? "Compilation Error"
+            : "Runtime Error",
+          error: typeof evaluationError === "string" ? evaluationError : (evaluationError.error || JSON.stringify(evaluationError)),
+          passed: 0,
+          total: problem?.testCases?.length || 0,
+        };
+      } else if (typeof resolvedExecution === "string") {
+        resolvedExecution = {
+          verdict: /syntax|compile|compilation|syntaxerror/i.test(resolvedExecution)
+            ? "Compilation Error"
+            : "Runtime Error",
+          error: resolvedExecution,
+          passed: 0,
+          total: problem?.testCases?.length || 0,
+        };
+      }
+
       let failureDetails = "";
-      if (execution) {
-        failureDetails += `Verdict: ${execution.verdict || "Evaluation Failed"}\n`;
-        failureDetails += `Passed Test Cases: ${execution.passed ?? 0} / ${execution.total ?? 0}\n`;
-        if (execution.error) {
-          failureDetails += `Error output: ${execution.error}\n`;
+      if (resolvedExecution) {
+        failureDetails += `Verdict: ${resolvedExecution.verdict || "Evaluation Failed"}\n`;
+        failureDetails += `Passed Test Cases: ${resolvedExecution.passed ?? 0} / ${resolvedExecution.total ?? 0}\n`;
+        if (resolvedExecution.error) {
+          failureDetails += `Error Output / Diagnostics: ${resolvedExecution.error}\n`;
         }
-        if (Array.isArray(execution.testResults)) {
-          const visibleFailed = execution.testResults.filter(
+        if (Array.isArray(resolvedExecution.testResults)) {
+          const visibleFailed = resolvedExecution.testResults.filter(
             (t) => !t.passed && !t.isHidden
           );
           if (visibleFailed.length > 0) {
             failureDetails += `Visible failed test cases:\n${JSON.stringify(
               visibleFailed.map((t) => ({
                 input: t.input,
-                expected: t.expected,
+                expected: t.expected !== undefined ? t.expected : t.expectedOutput,
                 actual: t.actual,
                 runtimeError: t.runtimeError,
               })),
@@ -1327,7 +1874,7 @@ ${String(code).slice(0, 10000) || "No code written yet."}
               2
             )}\n`;
           }
-          const hiddenFailed = execution.testResults.filter(
+          const hiddenFailed = resolvedExecution.testResults.filter(
             (t) => !t.passed && t.isHidden
           );
           if (hiddenFailed.length > 0) {
@@ -1337,22 +1884,26 @@ ${String(code).slice(0, 10000) || "No code written yet."}
       }
 
       contextPrompt += `\nDEBUGGING TASK:
-The user tested their code and encountered a failure.
-Execution Details:
-${failureDetails || "No execution details supplied."}
+The user has requested debugging assistance for their current code in the editor.
+Execution Diagnostics:
+${failureDetails || "No execution results available yet (code has not been run or no failures recorded)."}
 
 USER QUERY:
-${trimmedMessage || "Please debug my failed solution and tell me why it failed."}
+${trimmedMessage || "Please debug my code and explain why it failed."}
 
-DEBUGGING INSTRUCTIONS:
-1. Explain the likely root cause of the failure based on the actual verdict (Wrong Answer, Compilation Error, Runtime Error, or Time Limit Exceeded).
-2. Distinguish compilation syntax errors vs runtime exceptions vs infinite loops/timeouts vs algorithmic logic flaws.
-3. If visible test cases failed, compare what the code did versus what was expected.
-4. If only hidden tests failed, do NOT guess hidden inputs. Suggest likely edge cases (e.g. empty array, small length, negative numbers, duplicates, or boundary elements).
-5. If the problem is Max Peak-Valley Balance or involves subarrays, specifically check if the code counted subarray endpoints as peaks/valleys or ran Kadane globally on scores without excluding subarray endpoints.
-6. Propose a targeted correction or guidance. Be constructive and concise.
+CRITICAL DEBUGGING INSTRUCTIONS:
+1. PINPOINT THE USER'S CODE: Focus directly on 'User's Code in Editor'. Cite the exact function, line, variable names, conditions, or loop boundaries (e.g. \`nums[i] + nums[i+1]\`, \`i < nums.length\`) that cause the issue.
+2. DO NOT GIVE A GENERIC LECTURE: Do NOT re-explain the entire problem statement or give a broad theoretical lecture on algorithms. Stay laser-focused on their code and why it produced the failure.
+3. GROUND IN THE EXECUTION DETAILS:
+   - If visible test cases failed with Wrong Answer: Walk through the first failing input step-by-step with their code, showing why it produced \`actual\` instead of \`expected\`.
+   - If Verdict is Compilation Error or Runtime Error: Point directly to the syntax/runtime error in their code indicated by the error diagnostics.
+   - If only hidden test cases failed: Explain unhandled edge cases in their algorithmic logic (e.g. single element, negatives, duplicates, boundary indices) without inventing or revealing hidden inputs.
+   - If no execution details are available: Check if the user wrote code in the editor. If empty, ask them to write code. If code exists, analyze it for likely syntax or algorithmic flaws and suggest running the code to verify.
+4. TARGETED GUIDANCE: Explain what logical adjustment is needed concisely. Do not dump the entire solution code unless specifically requested.
+5. DECISIVE DIAGNOSIS WITHOUT SELF-CONTRADICTION: Deliver a single, clear diagnosis in Pepe's encouraging voice. Do not debate yourself, repeat internal monologues, or loop through rhetorical self-questions ("Wait! Why did it expect X?"). Ground the explanation strictly in the code and provided diagnostics.
+6. HONEST LIMITATIONS: If execution details or code are missing, state that limitation clearly and suggest running the code, rather than inventing imaginary failing inputs or line numbers.
 `;
-    } else if (action === "hint") {
+    } else if (effectiveAction === "hint") {
       const hintTitles = {
         1: "Hint 1: Conceptual nudge on problem pattern and structure.",
         2: "Hint 2: Specific observation, mathematical invariant, or boundary property.",
@@ -1370,7 +1921,7 @@ RULES:
 2. DO NOT repeat or rephrase previous hints.
 3. Point out new direction without giving away complete code.
 `;
-    } else if (action === "approach") {
+    } else if (effectiveAction === "approach") {
       contextPrompt += `\nAPPROACH EXPLANATION REQUEST:
 The user is asking for a clear conceptual explanation of the algorithm/approach to solve this problem.
 RULES:
@@ -1379,7 +1930,7 @@ RULES:
 3. Mention time and space complexities.
 4. DO NOT provide the full solution code yet (leave implementation to the user).
 `;
-    } else if (action === "solution") {
+    } else if (effectiveAction === "solution") {
       let refSolutionNote = "";
       if (problem?.referenceSolution?.code) {
         refSolutionNote = `\nVALIDATED REFERENCE ALGORITHM:\n${problem.referenceSolution.code}\nTime Complexity: ${problem.referenceSolution.timeComplexity || "O(n)"}\nSpace Complexity: ${problem.referenceSolution.spaceComplexity || "O(1)"}\nUse this verified algorithm as the foundation for your solution in \`${language}\`.\n`;
@@ -1506,7 +2057,7 @@ The user mentioned ${detectedCompany} in conversation. Acknowledge it warmly.
       }
     }
 
-    const aiResponse = await generateText(contextPrompt);
+    const aiResponse = await generateText(contextPrompt, { stage: "coach_chat" });
 
     if (!aiResponse || !aiResponse.trim()) {
       return res.status(502).json({
@@ -1516,7 +2067,6 @@ The user mentioned ${detectedCompany} in conversation. Acknowledge it warmly.
 
     let finalAnswer = aiResponse.trim();
     let generatedPlan = null;
-    let updatedProfile = onboardingProfile ? { ...onboardingProfile } : null;
 
     // Extract profile updates if present
     const profileMatch = finalAnswer.match(/\[PROFILE_JSON\]([\s\S]*?)\[\/PROFILE_JSON\]/);
@@ -1538,8 +2088,8 @@ The user mentioned ${detectedCompany} in conversation. Acknowledge it warmly.
       toolCallMatch = finalAnswer.match(/\[TOOL_CALL:generate_problem\]([\s\S]*?)\[\/TOOL_CALL\]/i);
       isExplicitGenRequest =
         !toolCallMatch &&
-        action === "chat" &&
-        /\b(?:generate|create|give me|load)\s+(?:a|an)?\s*(?:new\s+)?(?:easy|medium|hard)?\s*[\w\s]*?(?:problem|question)\b/i.test(trimmedMessage);
+        effectiveAction === "chat" &&
+        /\b(?:generate|create|give me|load|another|next)\s+(?:a|an)?\s*(?:new\s+)?(?:easy|medium|hard)?\s*[\w\s]*?(?:problem|question)\b/i.test(trimmedMessage);
     } else {
       // For company catalog requests, suppress and strip any unintended tool calls emitted by AI
       finalAnswer = finalAnswer.replace(/\[TOOL_CALL:generate_problem\][\s\S]*?\[\/TOOL_CALL\]/i, "").trim();
@@ -1579,7 +2129,7 @@ The user mentioned ${detectedCompany} in conversation. Acknowledge it warmly.
     }
 
     if (toolCallMatch || isExplicitGenRequest) {
-      let targetTopic = "Arrays";
+      let targetTopic = "Any";
       let targetDifficulty = "Medium";
 
       if (toolCallMatch) {
@@ -1604,11 +2154,13 @@ The user mentioned ${detectedCompany} in conversation. Acknowledge it warmly.
           targetDifficulty = adaptiveAssessment?.targetDifficulty || "Medium";
         }
 
-        const topicMatch = trimmedMessage.match(/\b(array|arrays|string|strings|dynamic programming|dp|tree|trees|graph|graphs|binary search|hash table|hash map|two pointers|stack|queue|recursion|greedy|heap|linked list)\b/i);
+        const topicMatch = trimmedMessage.match(/\b(array|arrays|string|strings|dynamic programming|dp|tree|trees|graph|graphs|binary search|hash table|hash map|two pointers|stack|queue|recursion|greedy|heap|linked list|trie|tries|bit manipulation|segment tree|disjoint set|union find)\b/i);
         if (topicMatch) {
           targetTopic = topicMatch[1];
         } else if (companyQuestionsResult?.questions?.[0]?.topics?.[0]) {
           targetTopic = companyQuestionsResult.questions[0].topics[0];
+        } else {
+          targetTopic = "Any";
         }
       }
 
@@ -1622,65 +2174,17 @@ The user mentioned ${detectedCompany} in conversation. Acknowledge it warmly.
         targetDifficulty = adaptiveAssessment.targetDifficulty;
       }
 
-      try {
-        const result = await createDsaProblem({
-          topic: targetTopic,
-          difficulty: targetDifficulty,
-        });
-
-        // Generate warm confirmation message observing the actual problem created
-        const confirmPrompt = `You are Pepe, the DSA Coach.
-The user asked: "${trimmedMessage}".
-You just successfully created and loaded an original AI practice problem "${result.problem.title}" (${result.difficulty} difficulty, topic: ${result.topic}) into their DSA Arena.
-Adaptive difficulty context for this choice: "${adaptiveAssessment.reason}".
-CRITICAL RULES:
-1. Clearly identify this as an original AI-generated practice problem.
-2. In 1-2 natural sentences, confirm the problem has been loaded and briefly mention the performance-grounded reason for choosing this ${result.difficulty} difficulty: "${adaptiveAssessment.reason}".
-3. Match user's language (Hindi, Hinglish, or English).
-4. NEVER describe, claim, or imply that this problem was retrieved from a company catalog (e.g. Amazon, Google, etc.).
-5. NEVER claim that this is a verified, official, or actual company interview question.
-6. Encourage them to try solving it or ask for a hint whenever they need one.
-Do not output code or full test cases. Return only the confirmation message.`;
-
-        let confirmationAnswer = "";
-        try {
-          confirmationAnswer = (await generateText(confirmPrompt)).trim();
-        } catch {
-          confirmationAnswer = `I've generated an original AI practice problem ("${result.problem.title}") [${result.difficulty} • ${result.topic}] and loaded it into your DSA Arena. ${adaptiveAssessment.reason} Try solving it, and ask me for a hint whenever you need one!`;
-        }
-
-        confirmationAnswer = sanitizeAiProblemConfirmation(confirmationAnswer, result, detectedCompany);
-
-        return res.status(200).json({
-          answer: confirmationAnswer,
-          action: "load_problem",
-          problem: result.problem,
-          topic: result.topic,
-          difficulty: result.difficulty,
-          onboardingProfile: updatedProfile,
-          adaptiveAssessment: {
-            currentDifficulty: adaptiveAssessment.currentDifficulty,
-            targetDifficulty: result.difficulty,
-            action: adaptiveAssessment.action,
-            reason: adaptiveAssessment.reason,
-            isExplicit: adaptiveAssessment.isExplicit,
-          },
-        });
-      } catch (err) {
-        console.error("Tool execution failed for createDsaProblem:", err);
-        return res.status(200).json({
-          answer: `I tried to generate a ${targetDifficulty} ${targetTopic} problem for your DSA Arena, but encountered an error: ${err.message}. Please try asking again.`,
-          action: "chat",
-          onboardingProfile: updatedProfile,
-          adaptiveAssessment: {
-            currentDifficulty: adaptiveAssessment?.currentDifficulty || "Medium",
-            targetDifficulty: targetDifficulty || "Medium",
-            action: adaptiveAssessment?.action || "maintain",
-            reason: adaptiveAssessment?.reason || "Practicing at standard difficulty.",
-            isExplicit: Boolean(adaptiveAssessment?.isExplicit),
-          },
-        });
-      }
+      return await loadAndConfirmDsaProblem({
+        targetTopic,
+        targetDifficulty,
+        trimmedMessage,
+        detectedCompany,
+        updatedProfile,
+        adaptiveAssessment,
+        problem,
+        res,
+        userId: req.user?.id,
+      });
     }
 
     const planMatch = finalAnswer.match(/\[PLAN_JSON\]([\s\S]*?)\[\/PLAN_JSON\]/);
@@ -1704,10 +2208,14 @@ Do not output code or full test cases. Return only the confirmation message.`;
           updateFields.plan = generatedPlan;
         }
         if (Object.keys(updateFields).length > 0) {
-          await StudyPlan.findOneAndUpdate(
-            { user: userId },
-            { $set: updateFields },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
+          await withBoundedTimeout(
+            StudyPlan.findOneAndUpdate(
+              { user: userId },
+              { $set: updateFields },
+              { upsert: true, new: true, setDefaultsOnInsert: true }
+            ).maxTimeMS(3000),
+            3000,
+            "StudyPlan.findOneAndUpdate"
           );
         }
       } catch (savePlanErr) {
@@ -1731,8 +2239,21 @@ Do not output code or full test cases. Return only the confirmation message.`;
     });
   } catch (error) {
     console.error("Error in Pepe coachChat:", error);
-    return res.status(500).json({
-      error: "Failed to process chat message with Pepe AI Coach. Please try again.",
+
+    const isUpstreamUnavailable =
+      error.status === 503 ||
+      error.status === 429 ||
+      error.name === "TimeoutError" ||
+      (error.name === "TypeError" && error.message?.includes("fetch failed")) ||
+      /ECONNRESET|ETIMEDOUT|ENOTFOUND|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET/i.test(error.message || "");
+
+    const statusCode = isUpstreamUnavailable ? 503 : 500;
+    const errorMessage = isUpstreamUnavailable
+      ? "AI Coach service is temporarily unavailable. Please try again shortly."
+      : "Failed to process chat message with Pepe AI Coach. Please try again.";
+
+    return res.status(statusCode).json({
+      error: errorMessage,
     });
   }
 }

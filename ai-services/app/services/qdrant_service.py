@@ -1,3 +1,5 @@
+import os
+
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -8,7 +10,7 @@ from qdrant_client.models import (
     MatchValue,
 )
 
-QDRANT_URL = "http://localhost:6333"
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 COLLECTION_NAME = "prepai_knowledge"
 
 client = QdrantClient(url=QDRANT_URL)
@@ -59,27 +61,35 @@ def search_similar(
     document_id: str,
     limit: int = 3,
 ):
-    results = client.query_points(
-        collection_name=COLLECTION_NAME,
-        query=vector,
-        query_filter=Filter(
-            must=[
-                FieldCondition(
-                    key="document_id",
-                    match=MatchValue(value=document_id),
-                )
-            ]
-        ),
-        limit=limit,
-    )
+    try:
+        collections = client.get_collections().collections
+        if not any(c.name == COLLECTION_NAME for c in collections):
+            return []
 
-    return [
-        {
-            "text": point.payload["text"],
-            "score": point.score,
-            "document_id": point.payload["document_id"],
-            "filename": point.payload["filename"],
-            "chunk_index": point.payload["chunk_index"],
-        }
-        for point in results.points
-    ]
+        results = client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=vector,
+            query_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="document_id",
+                        match=MatchValue(value=document_id),
+                    )
+                ]
+            ),
+            limit=limit,
+        )
+
+        return [
+            {
+                "text": point.payload["text"],
+                "score": point.score,
+                "document_id": point.payload["document_id"],
+                "filename": point.payload["filename"],
+                "chunk_index": point.payload["chunk_index"],
+            }
+            for point in results.points
+        ]
+    except Exception as e:
+        print(f"[Qdrant Service] Search failed gracefully: {e}")
+        return []

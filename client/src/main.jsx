@@ -13,6 +13,8 @@ import ResumeReviewer from "./pages/ResumeReviewer.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import SignupPage from "./pages/SignupPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
+import SettingsPage from "./pages/SettingsPage.jsx";
+import CalendarPage from "./pages/CalendarPage.jsx";
 
 const router = createBrowserRouter([
     {
@@ -39,8 +41,20 @@ const router = createBrowserRouter([
                         element: <ResumeReviewer />,
                     },
                     {
+                        path: "progress",
+                        element: <ProfilePage />,
+                    },
+                    {
                         path: "profile",
                         element: <ProfilePage />,
+                    },
+                    {
+                        path: "calendar",
+                        element: <CalendarPage />,
+                    },
+                    {
+                        path: "settings",
+                        element: <SettingsPage />,
                     },
                 ],
             },

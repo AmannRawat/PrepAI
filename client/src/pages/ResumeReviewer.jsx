@@ -325,19 +325,22 @@ const ResumeReviewer = () => {
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
-            <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2.5">
-              <Briefcase className="text-accent h-7 w-7" />
-              <span>Resume Reviewer & ATS Matcher</span>
+            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">
+              <FileText size={14} />
+              <span>Resume Reviewer</span>
+            </div>
+            <h1 className="text-2xl md:text-3xl font-bold text-text-primary tracking-tight">
+              Resume Reviewer
             </h1>
-            <p className="mt-1 text-sm text-text-secondary">
-              Upload your resume and paste the target job description to get an ATS-style match score, evidence gap analysis, and tailored bullet rewrites.
+            <p className="mt-0.5 text-xs text-text-secondary">
+              Upload your resume and get detailed ATS-style feedback.
             </p>
           </div>
 
           {feedback && (
             <button
               onClick={handleResetReview}
-              className="inline-flex items-center gap-1.5 self-start sm:self-auto rounded-lg border border-text-secondary/20 bg-surface/50 px-3 py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-text-secondary/10 transition"
+              className="inline-flex items-center gap-1.5 self-start sm:self-auto rounded-xl border border-border bg-surface-elevated/40 px-3 py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface transition"
               title="Start a new resume analysis"
             >
               <RotateCcw size={14} />
@@ -348,24 +351,29 @@ const ResumeReviewer = () => {
       </header>
 
       {/* Main Container */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1">
         {/* Left Column: Upload & Job Description Form */}
         <div className="lg:col-span-5 flex flex-col gap-5">
           {/* Resume Upload Card */}
-          <div className="rounded-xl border border-text-secondary/20 bg-surface/70 p-5 shadow-sm">
-            <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-3">
-              <FileText size={16} className="text-accent" />
-              <span>1. Your Resume (PDF)</span>
+          <div className="rounded-2xl border border-border/70 bg-surface/70 backdrop-blur-md p-5 shadow-lg">
+            <h2 className="text-xs font-bold text-text-primary uppercase tracking-wider flex items-center gap-2 mb-3">
+              <Upload size={15} className="text-emerald-400" />
+              <span>Upload Your Resume</span>
             </h2>
 
             {!selectedFile && !fileName ? (
               <label
                 htmlFor="resume-upload"
-                className="cursor-pointer flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-text-secondary/30 bg-background/50 p-6 text-center hover:border-accent hover:bg-accent/5 transition"
+                className="cursor-pointer flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border/80 bg-surface-elevated/30 p-6 text-center hover:border-emerald-500/60 hover:bg-emerald-500/5 transition group"
               >
-                <Upload className="w-10 h-10 text-accent mb-2" />
-                <span className="text-sm font-semibold text-text-primary">Click to upload resume</span>
-                <span className="text-xs text-text-secondary mt-1">PDF format (max 5MB)</span>
+                <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-3 group-hover:scale-105 transition-transform">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-bold text-text-primary">Upload Your Resume</span>
+                <span className="text-[11px] text-text-secondary mt-0.5 mb-3">PDF (Max 5MB)</span>
+                <span className="inline-flex items-center px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs transition shadow-sm">
+                  Choose File
+                </span>
                 <input
                   id="resume-upload"
                   type="file"
@@ -375,14 +383,19 @@ const ResumeReviewer = () => {
                 />
               </label>
             ) : (
-              <div className="flex items-center justify-between rounded-lg border border-text-secondary/20 bg-background/60 p-3">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500 shrink-0">
-                    <CheckCircle size={18} />
+              <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3.5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-9 w-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                    <FileText size={18} />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold text-text-primary truncate">{fileName || selectedFile?.name}</p>
-                    <p className="text-[11px] text-text-secondary">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-bold text-text-primary truncate">{fileName || selectedFile?.name}</p>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                        Linked
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-text-secondary mt-0.5">
                       {fileSize ? `${fileSize} MB • PDF` : 'PDF document ready'}
                     </p>
                   </div>
@@ -391,7 +404,7 @@ const ResumeReviewer = () => {
                 <div className="flex items-center gap-1">
                   <label
                     htmlFor="resume-upload-change"
-                    className="cursor-pointer px-2 py-1 text-xs text-accent hover:underline"
+                    className="cursor-pointer px-2 py-1 text-xs text-emerald-400 hover:underline font-medium"
                     title="Choose a different PDF"
                   >
                     Change
@@ -406,7 +419,7 @@ const ResumeReviewer = () => {
                   <button
                     type="button"
                     onClick={handleClearFile}
-                    className="p-1 text-text-secondary hover:text-rose-500 transition"
+                    className="p-1 text-text-secondary hover:text-red-400 transition"
                     title="Remove file"
                   >
                     <X size={16} />
@@ -417,7 +430,7 @@ const ResumeReviewer = () => {
           </div>
 
           {/* Target Job Description Card */}
-          <div className="rounded-xl border border-text-secondary/20 bg-surface/70 p-5 shadow-sm flex flex-col flex-1">
+          <div className="rounded-2xl border border-border/70 bg-surface/70 backdrop-blur-md p-5 shadow-lg flex flex-col flex-1">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
                 <Briefcase size={16} className="text-accent" />
@@ -523,15 +536,15 @@ const ResumeReviewer = () => {
 
           {feedback && (
             <div className="flex flex-col flex-1 overflow-hidden">
-              {/* Navigation Tabs */}
-              <div className="flex items-center gap-1 border-b border-text-secondary/20 pb-2 mb-4 overflow-x-auto">
+              {/* Navigation Tabs matching reference mockup */}
+              <div className="flex items-center gap-1.5 border-b border-border/40 pb-2 mb-4 overflow-x-auto">
                 <button
                   type="button"
                   onClick={() => setActiveTab('overview')}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
                     activeTab === 'overview'
-                      ? 'bg-accent text-white shadow-sm'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-text-secondary/10'
+                      ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 shadow-sm'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/40 border border-transparent'
                   }`}
                 >
                   <TrendingUp size={14} />
@@ -541,23 +554,23 @@ const ResumeReviewer = () => {
                 <button
                   type="button"
                   onClick={() => setActiveTab('gaps')}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
                     activeTab === 'gaps'
-                      ? 'bg-accent text-white shadow-sm'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-text-secondary/10'
+                      ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 shadow-sm'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/40 border border-transparent'
                   }`}
                 >
                   <Layers size={14} />
-                  <span>Evidence & Gap Analysis</span>
+                  <span>Evidence & Gaps</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setActiveTab('bullets')}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
                     activeTab === 'bullets'
-                      ? 'bg-accent text-white shadow-sm'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-text-secondary/10'
+                      ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 shadow-sm'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/40 border border-transparent'
                   }`}
                 >
                   <Sparkles size={14} />
@@ -567,10 +580,10 @@ const ResumeReviewer = () => {
                 <button
                   type="button"
                   onClick={() => setActiveTab('plan')}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
                     activeTab === 'plan'
-                      ? 'bg-accent text-white shadow-sm'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-text-secondary/10'
+                      ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 shadow-sm'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/40 border border-transparent'
                   }`}
                 >
                   <ListChecks size={14} />
@@ -584,7 +597,7 @@ const ResumeReviewer = () => {
                 {activeTab === 'overview' && (
                   <div className="space-y-4">
                     {/* Score Card */}
-                    <div className="rounded-xl border border-text-secondary/20 bg-background/50 p-4">
+                    <div className="rounded-2xl border border-border/60 bg-surface-elevated/40 p-4">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div>
                           <span className="text-[11px] font-semibold text-text-secondary uppercase tracking-wider">
@@ -676,7 +689,7 @@ const ResumeReviewer = () => {
                               </div>
                               <div className="h-1.5 w-full bg-text-secondary/20 rounded-full overflow-hidden">
                                 <div
-                                  className="h-full bg-purple-500 rounded-full transition-all"
+                                  className="h-full bg-cyan-500 rounded-full transition-all"
                                   style={{ width: `${Math.min(100, ((breakdown.structureScore || 0) / (breakdown.structureMax || 15)) * 100)}%` }}
                                 />
                               </div>

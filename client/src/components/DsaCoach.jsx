@@ -986,6 +986,22 @@ export default function DsaCoach({
 
                 const nextHintLevel = action === "hint" ? Math.min(3, hintLevel + 1) : hintLevel;
 
+                const effectiveExecution =
+                    executionResults ||
+                    runResults ||
+                    (evaluationError
+                        ? {
+                              verdict:
+                                  typeof evaluationError === "string" &&
+                                  /syntax|compile|compilation|syntaxerror/i.test(evaluationError)
+                                      ? "Compilation Error"
+                                      : "Runtime Error",
+                              error: typeof evaluationError === "string" ? evaluationError : (evaluationError.error || JSON.stringify(evaluationError)),
+                              passed: 0,
+                              total: activeProblem?.testCases?.length || 0,
+                          }
+                        : null);
+
                 const payload = {
                     action,
                     message: extraPayload.message || "",
@@ -997,7 +1013,8 @@ export default function DsaCoach({
                     previousHints: hintHistory,
                     onboardingProfile,
                     plan: personalizedPlan,
-                    execution: executionResults || runResults,
+                    execution: effectiveExecution,
+                    evaluationError: evaluationError || null,
                     ...extraPayload,
                 };
 
@@ -1243,7 +1260,7 @@ export default function DsaCoach({
         (text, actionOverride = null) => {
             const trimmed = text.trim();
 
-            if (!trimmed || typingMessageId || isRequesting) return;
+            if (!trimmed || typingMessageId || isRequesting || requestInFlightRef.current) return;
 
             if (!isLoggedIn) {
                 openLogin();
@@ -1323,11 +1340,18 @@ export default function DsaCoach({
                 return;
             }
 
-            if (
+            const isDebugIntent =
                 normalized.includes("debug") ||
                 normalized.includes("why did my code fail") ||
-                normalized.includes("why did it fail")
-            ) {
+                normalized.includes("why did it fail") ||
+                normalized.includes("why is my code failing") ||
+                normalized.includes("why is my code wrong") ||
+                normalized.includes("why did my test") ||
+                normalized.includes("where is the bug") ||
+                normalized.includes("what is wrong with my code") ||
+                normalized.includes("why does it fail");
+
+            if (isDebugIntent) {
                 void requestCoachAnswer("debug", { message: trimmed });
                 return;
             }
@@ -1413,6 +1437,7 @@ export default function DsaCoach({
             openLogin();
             return;
         }
+        if (isRequesting || requestInFlightRef.current || Boolean(typingMessageId)) return;
         setShowGiveUpOptions(false);
         const nextLevel = Math.min(3, hintLevel + 1);
         sendUserMessage(`Give me Hint ${nextLevel}`, "hint");
@@ -1423,6 +1448,7 @@ export default function DsaCoach({
             openLogin();
             return;
         }
+        if (isRequesting || requestInFlightRef.current || Boolean(typingMessageId)) return;
         setShowGiveUpOptions(false);
         setHasGivenUp(true);
         if (onGiveUp) onGiveUp();
@@ -1436,6 +1462,7 @@ export default function DsaCoach({
             openLogin();
             return;
         }
+        if (isRequesting || requestInFlightRef.current || Boolean(typingMessageId)) return;
         setShowGiveUpOptions(false);
         sendUserMessage("Explain approach", "approach");
     };
@@ -1445,6 +1472,7 @@ export default function DsaCoach({
             openLogin();
             return;
         }
+        if (isRequesting || requestInFlightRef.current || Boolean(typingMessageId)) return;
         setShowGiveUpOptions(false);
         setHasGivenUp(true);
         if (onGiveUp) onGiveUp();
@@ -1456,6 +1484,7 @@ export default function DsaCoach({
             openLogin();
             return;
         }
+        if (isRequesting || requestInFlightRef.current || Boolean(typingMessageId)) return;
         setShowGiveUpOptions(false);
         sendUserMessage("Can you help debug why my code failed the test cases?", "debug");
     };
@@ -1654,7 +1683,8 @@ export default function DsaCoach({
                                             <button
                                                 type="button"
                                                 onClick={handleHint}
-                                                className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-amber-500/30 px-2.5 py-1.5 text-[11px] font-semibold text-amber-500 transition hover:bg-amber-500/10"
+                                                disabled={isRequesting || Boolean(typingMessageId)}
+                                                className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-amber-500/30 px-2.5 py-1.5 text-[11px] font-semibold text-amber-500 transition hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                                                 title="Get a progressive hint for the active problem"
                                             >
                                                 <Lightbulb size={13} />
@@ -1664,7 +1694,8 @@ export default function DsaCoach({
                                             <button
                                                 type="button"
                                                 onClick={handleGiveUp}
-                                                className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-text-secondary/20 px-2.5 py-1.5 text-[11px] font-medium text-text-secondary transition hover:bg-text-secondary/10 hover:text-amber-400"
+                                                disabled={isRequesting || Boolean(typingMessageId)}
+                                                className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-text-secondary/20 px-2.5 py-1.5 text-[11px] font-medium text-text-secondary transition hover:bg-text-secondary/10 hover:text-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
                                                 title="Give up on solving this problem and reveal approach & solution"
                                             >
                                                 <AlertCircle size={13} />
@@ -1676,7 +1707,8 @@ export default function DsaCoach({
                                             <button
                                                 type="button"
                                                 onClick={handleExplainApproach}
-                                                className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-text-secondary/20 px-2.5 py-1.5 text-[11px] font-medium transition hover:bg-text-secondary/10"
+                                                disabled={isRequesting || Boolean(typingMessageId)}
+                                                className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-text-secondary/20 px-2.5 py-1.5 text-[11px] font-medium transition hover:bg-text-secondary/10 disabled:cursor-not-allowed disabled:opacity-50"
                                                 title="Explain the algorithmic approach for this problem"
                                             >
                                                 <Lightbulb size={13} />
@@ -1686,7 +1718,8 @@ export default function DsaCoach({
                                             <button
                                                 type="button"
                                                 onClick={handleShowSolution}
-                                                className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-blue-700"
+                                                disabled={isRequesting || Boolean(typingMessageId)}
+                                                className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                                                 title="Show the complete reference solution"
                                             >
                                                 <Sparkles size={13} />
@@ -1699,7 +1732,8 @@ export default function DsaCoach({
                                         <button
                                             type="button"
                                             onClick={handleDebugSolution}
-                                            className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-[11px] font-semibold text-red-500 transition hover:bg-red-500/20"
+                                            disabled={isRequesting || Boolean(typingMessageId)}
+                                            className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-[11px] font-semibold text-red-500 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                                             title="Debug why your code failed test cases"
                                         >
                                             <Bug size={13} />
@@ -1710,7 +1744,8 @@ export default function DsaCoach({
                                     <button
                                         type="button"
                                         onClick={handleMyPlan}
-                                        className="inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-text-secondary/20 px-2.5 py-1.5 text-[11px] font-medium transition hover:bg-text-secondary/10"
+                                        disabled={isRequesting || Boolean(typingMessageId)}
+                                        className="inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-text-secondary/20 px-2.5 py-1.5 text-[11px] font-medium transition hover:bg-text-secondary/10 disabled:cursor-not-allowed disabled:opacity-50"
                                         title="View or edit your personalized study plan"
                                     >
                                         <CalendarDays size={13} />

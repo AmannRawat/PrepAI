@@ -31,7 +31,7 @@ function normalizeValue(value) {
 /**
  * Compares actual and expected outputs, ignoring object key ordering.
  */
-function valuesEqual(actual, expected) {
+export function valuesEqual(actual, expected) {
     if (
         JSON.stringify(normalizeValue(actual)) ===
         JSON.stringify(normalizeValue(expected))
@@ -924,10 +924,11 @@ export async function executeCode({
     } catch (fetchErr) {
         if (fetchErr.name === "TimeoutError" || fetchErr.name === "AbortError") {
             return {
-                verdict: "Time Limit Exceeded",
-                error: "Execution timed out. The program exceeded the time limit.",
+                verdict: "Provider Timeout",
+                error: "Execution provider timed out. The compiler service did not respond within 15 seconds.",
                 passed: 0,
                 total: testCases.length,
+                isProviderFailure: true,
                 executionTime: null,
                 testResults: testCases.map((tc, idx) => ({
                     index: idx,
@@ -940,21 +941,74 @@ export async function executeCode({
                               expected: tc.expectedOutput,
                               actual: null,
                           }),
-                    runtimeError: "Execution timed out (Time Limit Exceeded).",
+                    runtimeError: "Execution provider timed out.",
                 })),
             };
         }
+
+        const isNetworkErr =
+            fetchErr.name === "TypeError" ||
+            /ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|fetch failed/i.test(fetchErr.message || "");
+
+        if (isNetworkErr) {
+            return {
+                verdict: "Execution Unavailable",
+                error: `Code execution provider network connection failed: ${fetchErr.message}`,
+                passed: 0,
+                total: testCases.length,
+                isProviderFailure: true,
+                executionTime: null,
+                testResults: testCases.map((tc, idx) => ({
+                    index: idx,
+                    passed: false,
+                    isHidden: Boolean(tc.isHidden),
+                    ...(tc.isHidden
+                        ? {}
+                        : {
+                              input: tc.input,
+                              expected: tc.expectedOutput,
+                              actual: null,
+                          }),
+                    runtimeError: "Code execution provider network connection failed.",
+                })),
+            };
+        }
+
         throw fetchErr;
     }
 
     if (!response.ok) {
         console.error("OnlineCompiler HTTP error status:", response.status);
 
-        throw new Error(
-            response.status === 429
-                ? "Execution quota or rate limit reached. Please wait a moment and try again."
-                : "The code execution provider rejected the request."
-        );
+        const isQuota = response.status === 429;
+        const isServerUnavailable = response.status >= 500;
+        const errorMsg = isQuota
+            ? "Execution quota or rate limit reached. Please wait a moment and try again."
+            : isServerUnavailable
+            ? "Code execution provider service is temporarily unavailable."
+            : "The code execution provider rejected the request.";
+
+        return {
+            verdict: "Execution Unavailable",
+            error: errorMsg,
+            passed: 0,
+            total: testCases.length,
+            isProviderFailure: true,
+            executionTime: null,
+            testResults: testCases.map((tc, idx) => ({
+                index: idx,
+                passed: false,
+                isHidden: Boolean(tc.isHidden),
+                ...(tc.isHidden
+                    ? {}
+                    : {
+                          input: tc.input,
+                          expected: tc.expectedOutput,
+                          actual: null,
+                      }),
+                runtimeError: errorMsg,
+            })),
+        };
     }
 
     // Check for provider-level timeout status, GNU timeout exit code (124), or container kill (137)

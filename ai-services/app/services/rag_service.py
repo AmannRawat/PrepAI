@@ -61,14 +61,18 @@ def retrieve_context(
     query: str,
     document_id: str,
 ):
-    query_embedding = create_embedding(query)
+    try:
+        query_embedding = create_embedding(query)
 
-    results = search_similar(
-        query_embedding,
-        document_id=document_id,
-    )
+        results = search_similar(
+            query_embedding,
+            document_id=document_id,
+        )
 
-    return results
+        return results
+    except Exception as e:
+        print(f"Warning: Vector retrieval unavailable ({e}). Continuing without vector context.")
+        return []
 
 
 def generate_rag_answer(

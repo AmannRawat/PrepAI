@@ -1,4 +1,5 @@
 import uuid
+import time
 
 from fastapi import APIRouter, File, UploadFile, HTTPException
 from langgraph.types import Command
@@ -158,6 +159,13 @@ async def start_interview(request: StartInterviewRequest):
             "document_id": request.document_id,
             "target_role": request.target_role,
             "target_company": request.target_company,
+            "interview_type": request.interview_type or "Behavioral",
+            "difficulty": request.difficulty or "Medium",
+            "stage_plan": request.stage_plan or [],
+            "current_stage_index": request.current_stage_index or 0,
+            "experience_level": request.experience_level or "fresher",
+            "years_of_experience": request.years_of_experience or "",
+            "focus_areas": request.focus_areas or "",
             "resume_context": "",
             "memory_context": request.memory_context,
             "current_question": request.first_question,
@@ -177,6 +185,8 @@ async def start_interview(request: StartInterviewRequest):
         "session_id": request.session_id,
         "status": "waiting_for_answer",
         "question": request.first_question,
+        "stage_plan": request.stage_plan or [],
+        "current_stage_index": request.current_stage_index or 0,
     }
 
 
@@ -192,32 +202,46 @@ async def submit_interview_answer(
         }
     }
 
+    t_start = time.perf_counter()
+
     try:
         result = interview_graph.invoke(
             Command(resume=request.answer),
             config=config,
         )
 
+        total_duration_ms = round((time.perf_counter() - t_start) * 1000, 2)
+
         # Interview finished
         if result.get("final_report"):
+            print(f"[Turn Timing] session_id={session_id} total_turn_duration_ms={total_duration_ms} status=completed")
             return {
                 "session_id": session_id,
                 "status": "completed",
                 "final_report": result["final_report"],
+                "stage_plan": result.get("stage_plan", []),
+                "current_stage_index": result.get("current_stage_index", 0),
                 "memories": result.get("memories", []),
+                "turn_duration_ms": total_duration_ms,
             }
 
         # Interview continues
         question = result.get("current_question")
+        print(f"[Turn Timing] session_id={session_id} total_turn_duration_ms={total_duration_ms} status=waiting_for_answer")
 
         return {
             "session_id": session_id,
             "status": "waiting_for_answer",
             "question": question,
+            "stage_plan": result.get("stage_plan", []),
+            "current_stage_index": result.get("current_stage_index", 0),
             "memories": result.get("memories", []),
+            "turn_duration_ms": total_duration_ms,
         }
 
     except Exception as error:
+        total_duration_ms = round((time.perf_counter() - t_start) * 1000, 2)
+        print(f"[Turn Timing] session_id={session_id} total_turn_duration_ms={total_duration_ms} status=error error={str(error)}")
         raise HTTPException(
             status_code=500,
             detail=str(error),

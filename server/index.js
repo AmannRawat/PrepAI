@@ -13,7 +13,7 @@ import behavioralRoutes from "./routes/behavioral.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import interviewRoutes from "./routes/interview.routes.js";
 
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 5000;
 
 
 const app = express();
