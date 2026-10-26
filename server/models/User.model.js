@@ -30,7 +30,7 @@ const userSchema = new mongoose.Schema({
     },
     currentStreak: {
         type: Number,
-        default: 10 // Start all users at 0
+        default: 0 // Start all users at 0
     },
     lastActivityDate: {
         type: Date
@@ -38,6 +38,15 @@ const userSchema = new mongoose.Schema({
     resumeDocumentId: {
         type: String,
         default: null
+    },
+    careerPreferences: {
+        targetRole: { type: String, default: null },
+        targetCompany: { type: String, default: null },
+        experienceLevel: { type: String, default: null },
+        yearsOfExperience: { type: String, default: null },
+        defaultLanguage: { type: String, default: 'javascript' },
+        preferredVoice: { type: String, default: '' },
+        preferredResumeId: { type: String, default: null },
     }
 }, {
     // Adds 'createdAt' and 'updatedAt' timestamps automatically

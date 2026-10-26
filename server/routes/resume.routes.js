@@ -2,7 +2,12 @@ import { Router } from "express";
 import multer from "multer";
 
 import authMiddleware from "../middleware/auth.middleware.js";
-import { reviewResume, getLatestResumeReview } from "../controllers/resume.controller.js";
+import {
+    reviewResume,
+    getLatestResumeReview,
+    getUserResumes,
+    setPreferredResume,
+} from "../controllers/resume.controller.js";
 
 const router = Router();
 
@@ -57,6 +62,18 @@ router.get(
     "/review-resume/latest",
     authMiddleware,
     getLatestResumeReview
+);
+
+router.get(
+    "/my-resumes",
+    authMiddleware,
+    getUserResumes
+);
+
+router.put(
+    "/preferred",
+    authMiddleware,
+    setPreferredResume
 );
 
 export default router;

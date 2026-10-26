@@ -83,9 +83,25 @@ const DsaArena = () => {
   const { getToken, isLoggedIn, userId } = useAuth();
   const { openLogin } = useModal();
   const [codeByLanguage, setCodeByLanguage] = useState({});
-  const [code, setCode] = useState(DEFAULT_BOILERPLATES.javascript);
-  const [language, setLanguage] = useState('javascript');
-  const [langExtension, setLangExtension] = useState(javascript({ jsx: true }));
+  const [language, setLanguage] = useState(() => {
+    const saved = localStorage.getItem('prepai_default_language');
+    return SUPPORTED_LANGUAGES.includes(saved) ? saved : 'javascript';
+  });
+  const [code, setCode] = useState(() => {
+    const saved = localStorage.getItem('prepai_default_language');
+    const lang = SUPPORTED_LANGUAGES.includes(saved) ? saved : 'javascript';
+    return DEFAULT_BOILERPLATES[lang] || DEFAULT_BOILERPLATES.javascript;
+  });
+  const [langExtension, setLangExtension] = useState(() => {
+    const saved = localStorage.getItem('prepai_default_language');
+    const lang = SUPPORTED_LANGUAGES.includes(saved) ? saved : 'javascript';
+    switch (lang) {
+      case 'python': return python();
+      case 'java': return java();
+      case 'cpp': return cpp();
+      default: return javascript({ jsx: true });
+    }
+  });
 
   const [problem, setProblem] = useState(null);
   const [topic, setTopic] = useState('Arrays');
@@ -370,7 +386,10 @@ const DsaArena = () => {
     lastSubmittedCodeRef.current = null;
     setPendingProblemLoad(null);
 
-    const defaultCode = DEFAULT_BOILERPLATES[language] || DEFAULT_BOILERPLATES.javascript;
+    const savedDefault = localStorage.getItem('prepai_default_language');
+    const resetLang = SUPPORTED_LANGUAGES.includes(savedDefault) ? savedDefault : 'javascript';
+    setLanguage(resetLang);
+    const defaultCode = DEFAULT_BOILERPLATES[resetLang] || DEFAULT_BOILERPLATES.javascript;
     setCode(defaultCode);
     setCodeByLanguage({});
 

@@ -13,9 +13,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 const Layout = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { userName, isLoggedIn, isLoaded } = useAuth();
+  const { userName, userImageUrl, isLoggedIn, isLoaded } = useAuth();
   const { openLogin } = useModal();
-  const { dashboardBg, theme } = useTheme();
+  const { dashboardBg, isBgLoading, theme } = useTheme();
 
   const userInitial = userName ? userName.charAt(0).toUpperCase() : null;
 
@@ -32,11 +32,12 @@ const Layout = () => {
         {/* Shared mountain landscape background layer for Dashboard - extends to very top behind header */}
         {isDashboard && (
           <div
-            className="absolute top-0 left-0 right-0 h-[960px] sm:h-[840px] lg:h-[740px] pointer-events-none z-0 overflow-hidden"
+            className="absolute top-0 left-0 right-0 h-[960px] sm:h-[840px] lg:h-[740px] pointer-events-none z-0 overflow-hidden transition-opacity duration-300"
             style={{
+              opacity: isBgLoading ? 0 : 1,
               backgroundImage: isLight
-                ? `linear-gradient(to bottom, rgba(243, 244, 241, 0.35) 0%, rgba(243, 244, 241, 0.30) 20%, rgba(243, 244, 241, 0.65) 55%, rgba(243, 244, 241, 0.90) 80%, var(--color-background) 100%), url("${dashboardBg || '/backgrounds/bg-mountain-night.jpg'}")`
-                : `linear-gradient(to bottom, rgba(9, 11, 14, 0.04) 0%, rgba(9, 11, 14, 0.02) 20%, rgba(9, 11, 14, 0.2) 50%, rgba(9, 11, 14, 0.72) 80%, var(--color-background) 100%), url("${dashboardBg || '/backgrounds/bg-mountain-night.jpg'}")`,
+                ? `linear-gradient(to bottom, rgba(243, 244, 241, 0.68) 0%, rgba(243, 244, 241, 0.60) 25%, rgba(243, 244, 241, 0.82) 55%, rgba(243, 244, 241, 0.95) 80%, var(--color-background) 100%), url("${dashboardBg || '/backgrounds/bg-lake-morning.jpg'}")`
+                : `linear-gradient(to bottom, rgba(9, 11, 14, 0.04) 0%, rgba(9, 11, 14, 0.02) 20%, rgba(9, 11, 14, 0.2) 50%, rgba(9, 11, 14, 0.72) 80%, var(--color-background) 100%), url("${dashboardBg || '/backgrounds/bg-lake-morning.jpg'}")`,
               backgroundSize: 'cover',
               backgroundPosition: 'center top',
               backgroundRepeat: 'no-repeat',
@@ -65,11 +66,28 @@ const Layout = () => {
             <button
               type="button"
               onClick={() => navigate('/settings')}
-              className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white font-semibold text-xs flex items-center justify-center shrink-0 shadow-sm hover:ring-2 hover:ring-emerald-400/50 transition cursor-pointer"
+              className="w-8 h-8 rounded-full overflow-hidden shrink-0 shadow-sm hover:ring-2 hover:ring-emerald-400/50 transition cursor-pointer"
               title="Account & Settings"
               aria-label="Account Settings"
             >
-              {userInitial || 'U'}
+              {userImageUrl ? (
+                <img
+                  src={userImageUrl}
+                  alt={userName || 'User'}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    if (e.currentTarget.nextElementSibling) {
+                      e.currentTarget.nextElementSibling.style.display = 'flex';
+                    }
+                  }}
+                />
+              ) : null}
+              <div
+                className={`w-full h-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white font-semibold text-xs items-center justify-center ${userImageUrl ? 'hidden' : 'flex'}`}
+              >
+                {userInitial || 'U'}
+              </div>
             </button>
           ) : (
             <button

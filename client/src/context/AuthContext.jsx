@@ -15,7 +15,7 @@ export const AuthProvider = ({ children }) => {
         user,
     } = useUser();
 
-    const { signOut } = useClerk();
+    const clerk = useClerk();
 
     const isLoaded = authLoaded && userLoaded;
 
@@ -24,7 +24,13 @@ export const AuthProvider = ({ children }) => {
     };
 
     const logout = async () => {
-        await signOut();
+        await clerk.signOut();
+    };
+
+    const openUserProfile = () => {
+        if (typeof clerk?.openUserProfile === 'function') {
+            clerk.openUserProfile();
+        }
     };
 
     // Do not render the application until Clerk has finished
@@ -49,7 +55,9 @@ export const AuthProvider = ({ children }) => {
         token: null,
         userEmail: user?.primaryEmailAddress?.emailAddress || null,
         userName: user?.fullName || user?.firstName || null,
+        userImageUrl: user?.imageUrl || null,
         userId: user?.id || null,
+        openUserProfile,
         login,
         logout,
         getToken,

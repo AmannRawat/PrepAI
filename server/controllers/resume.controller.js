@@ -271,6 +271,7 @@ Follow this schema exactly:
             const newReview = new ResumeReview({
                 user: userId,
                 documentId: documentId,
+                fileName: req.file?.originalname || (jobTitle ? `${jobTitle} Resume.pdf` : "Resume.pdf"),
                 jobTitle: jobTitle || "Target Role",
                 jobDescription: sanitizedJobDescription,
                 atsAssessment: parsedResponse.atsAssessment,
@@ -321,6 +322,122 @@ export async function getLatestResumeReview(req, res) {
         console.error("Error retrieving latest resume review:", error);
         return res.status(500).json({
             error: "Failed to retrieve resume review.",
+        });
+    }
+}
+
+/**
+ * Retrieves all uploaded resumes and reviews for the authenticated user with preferred status.
+ */
+export async function getUserResumes(req, res) {
+    try {
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({
+                success: false,
+                message: "Authentication required. Please sign in.",
+            });
+        }
+
+        const user = await User.findById(req.user.id).select("careerPreferences resumeDocumentId");
+        const reviews = await ResumeReview.find({ user: req.user.id })
+            .sort({ createdAt: -1 })
+            .select("fileName jobTitle atsAssessment documentId createdAt");
+
+        const preferredId = user?.careerPreferences?.preferredResumeId || null;
+        const currentDocId = user?.resumeDocumentId || null;
+
+        let highestScore = -1;
+        reviews.forEach((r) => {
+            const score = Number(r.atsAssessment?.estimatedScore) || 0;
+            if (score > highestScore) highestScore = score;
+        });
+
+        const formattedResumes = reviews.map((r, index) => {
+            const score = Number(r.atsAssessment?.estimatedScore) || 0;
+            const isPreferred = preferredId
+                ? String(preferredId) === String(r._id)
+                : Boolean(currentDocId && currentDocId === r.documentId);
+
+            return {
+                _id: r._id,
+                fileName: r.fileName || (r.jobTitle ? `${r.jobTitle} Resume.pdf` : "Uploaded Resume.pdf"),
+                jobTitle: r.jobTitle || "Target Role",
+                atsScore: score,
+                documentId: r.documentId,
+                createdAt: r.createdAt,
+                isPreferred,
+                isNewest: index === 0,
+                isHighestScore: score > 0 && score === highestScore,
+            };
+        });
+
+        return res.status(200).json({
+            success: true,
+            preferredResumeId: preferredId,
+            resumes: formattedResumes,
+        });
+    } catch (error) {
+        console.error("Error fetching user resumes:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch user resumes.",
+        });
+    }
+}
+
+/**
+ * Designates an existing resume owned by the user as their preferred resume.
+ */
+export async function setPreferredResume(req, res) {
+    try {
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({
+                success: false,
+                message: "Authentication required. Please sign in.",
+            });
+        }
+
+        const { resumeId } = req.body || {};
+        if (!resumeId) {
+            return res.status(400).json({
+                success: false,
+                message: "Please specify a resumeId to designate as preferred.",
+            });
+        }
+
+        // Verify ownership: Resume must belong to authenticated user
+        const review = await ResumeReview.findOne({
+            _id: resumeId,
+            user: req.user.id,
+        });
+
+        if (!review) {
+            return res.status(404).json({
+                success: false,
+                message: "Resume not found or does not belong to your account.",
+            });
+        }
+
+        const updateFields = {
+            "careerPreferences.preferredResumeId": review._id.toString(),
+        };
+        if (review.documentId) {
+            updateFields.resumeDocumentId = review.documentId;
+        }
+
+        await User.findByIdAndUpdate(req.user.id, { $set: updateFields });
+
+        return res.status(200).json({
+            success: true,
+            message: "Preferred resume updated successfully.",
+            preferredResumeId: review._id.toString(),
+            documentId: review.documentId || null,
+        });
+    } catch (error) {
+        console.error("Error designating preferred resume:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to set preferred resume.",
         });
     }
 }

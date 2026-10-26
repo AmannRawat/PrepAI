@@ -11,7 +11,7 @@ const DB_VERSION = 1;
 const STORE_NAME = 'custom_backgrounds';
 const RECORD_KEY = 'current_custom_bg';
 
-export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+export const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024; // 8 MB
 export const MIN_WIDTH = 800;
 export const MIN_HEIGHT = 450;
 export const MAX_WIDTH = 7680;
@@ -50,13 +50,27 @@ function openDatabase() {
 }
 
 /**
+ * Resolve IndexedDB record key partitioned by user account
+ * @param {string} accountScope - Clerk userId or 'guest'
+ * @returns {string} Partitioned record key
+ */
+export function getStorageRecordKey(accountScope = 'guest') {
+  if (!accountScope || accountScope === 'guest') {
+    return 'guest_custom_bg';
+  }
+  return `custom_bg_${accountScope}`;
+}
+
+/**
  * Save custom background image blob and its metadata into IndexedDB
  * @param {Blob|File} blob - Raw image binary
  * @param {object} metadata - File metadata (fileName, mimeType, width, height)
+ * @param {string} accountScope - User account ID or 'guest'
  * @returns {Promise<object>} Stored record summary
  */
-export async function saveCustomBackground(blob, metadata = {}) {
+export async function saveCustomBackground(blob, metadata = {}, accountScope = 'guest') {
   const db = await openDatabase();
+  const recordKey = getStorageRecordKey(accountScope);
 
   return new Promise((resolve, reject) => {
     try {
@@ -64,7 +78,7 @@ export async function saveCustomBackground(blob, metadata = {}) {
       const store = transaction.objectStore(STORE_NAME);
 
       const record = {
-        id: RECORD_KEY,
+        id: recordKey,
         blob,
         fileName: metadata.fileName || 'custom-background',
         mimeType: metadata.mimeType || blob.type || 'image/jpeg',
@@ -103,21 +117,48 @@ export async function saveCustomBackground(blob, metadata = {}) {
 }
 
 /**
- * Retrieve the active custom background image from IndexedDB
+ * Retrieve the active custom background image from IndexedDB for the given account
+ * @param {string} accountScope - User account ID or 'guest'
  * @returns {Promise<{ blob: Blob, metadata: object }|null>}
  */
-export async function getCustomBackground() {
+export async function getCustomBackground(accountScope = 'guest') {
   const db = await openDatabase();
+  const recordKey = getStorageRecordKey(accountScope);
 
   return new Promise((resolve, reject) => {
     try {
       const transaction = db.transaction([STORE_NAME], 'readonly');
       const store = transaction.objectStore(STORE_NAME);
-      const getRequest = store.get(RECORD_KEY);
+      const getRequest = store.get(recordKey);
 
       getRequest.onsuccess = () => {
         const record = getRequest.result;
         if (!record || !record.blob) {
+          // If guest, check legacy 'current_custom_bg' as fallback migration
+          if (!accountScope || accountScope === 'guest') {
+            const legacyReq = store.get('current_custom_bg');
+            legacyReq.onsuccess = () => {
+              const legacyRecord = legacyReq.result;
+              if (legacyRecord && legacyRecord.blob) {
+                resolve({
+                  blob: legacyRecord.blob,
+                  metadata: {
+                    id: legacyRecord.id,
+                    fileName: legacyRecord.fileName,
+                    mimeType: legacyRecord.mimeType,
+                    width: legacyRecord.width,
+                    height: legacyRecord.height,
+                    sizeBytes: legacyRecord.sizeBytes,
+                    updatedAt: legacyRecord.updatedAt,
+                  },
+                });
+              } else {
+                resolve(null);
+              }
+            };
+            legacyReq.onerror = () => resolve(null);
+            return;
+          }
           resolve(null);
         } else {
           resolve({
@@ -150,18 +191,26 @@ export async function getCustomBackground() {
 }
 
 /**
- * Delete custom background image from IndexedDB
+ * Delete custom background image from IndexedDB for the given account
+ * @param {string} accountScope - User account ID or 'guest'
  */
-export async function deleteCustomBackground() {
+export async function deleteCustomBackground(accountScope = 'guest') {
   const db = await openDatabase();
+  const recordKey = getStorageRecordKey(accountScope);
 
   return new Promise((resolve, reject) => {
     try {
       const transaction = db.transaction([STORE_NAME], 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
-      const deleteRequest = store.delete(RECORD_KEY);
+      const deleteRequest = store.delete(recordKey);
 
       deleteRequest.onsuccess = () => {
+        // Also remove legacy key if guest deletes
+        if (!accountScope || accountScope === 'guest') {
+          try {
+            store.delete('current_custom_bg');
+          } catch (e) {}
+        }
         resolve(true);
       };
 
@@ -251,7 +300,7 @@ export async function validateImageFile(file) {
     const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
     return {
       valid: false,
-      error: `File is too large (${sizeMb} MB). Maximum allowed background size is 5 MB.`,
+      error: `File is too large (${sizeMb} MB). Maximum allowed background size is 8 MB.`,
     };
   }
 

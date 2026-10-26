@@ -18,13 +18,21 @@ import ResumeReview from "../models/ResumeReview.model.js";
  * Generates an adaptive stage plan based on candidate experience level,
  * interview type (Technical, Behavioral, Mixed), and baseline difficulty.
  */
-export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewType = "Behavioral", difficulty = "Medium") {
+export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewType = "Behavioral", difficulty = "Medium", focusAreas = "") {
     const exp = (experienceLevel || "fresher").toLowerCase();
     const type = (interviewType || "Behavioral").toLowerCase();
+    const cleanFocus = (typeof focusAreas === "string" ? focusAreas.trim() : "");
+    const focusSnippet = cleanFocus.length > 0 ? (cleanFocus.length > 30 ? cleanFocus.slice(0, 28) + "..." : cleanFocus) : "";
 
     const isFresher = exp.includes("student") || exp.includes("intern") || exp.includes("fresher") || exp.includes("entry");
     const isJunior = exp.includes("junior");
-    const isSenior = exp.includes("senior") || exp.includes("lead") || exp.includes("staff") || exp.includes("principal");
+    const isLead = exp.includes("lead") || exp.includes("staff") || exp.includes("principal");
+    const isSenior = (exp.includes("senior") || isLead) && !isJunior && !isFresher;
+
+    const withFocus = (baseTitle, customTitle) => {
+        if (!focusSnippet) return baseTitle;
+        return customTitle || `${baseTitle} (${focusSnippet})`;
+    };
 
     if (isFresher) {
         if (type.includes("tech")) {
@@ -32,7 +40,7 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Welcome and Introduction",
                 "Fundamentals and Core CS",
                 "Problem Solving",
-                "Academic Projects or Practical Experience",
+                withFocus("Academic Projects or Practical Experience", focusSnippet ? `Projects & Applied Coding: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         } else if (type.includes("behav")) {
@@ -40,7 +48,7 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Welcome and Introduction",
                 "Academic, Teamwork or Internship Experience",
                 "Communication, Adaptability and Learning",
-                "Situational Questions",
+                withFocus("Situational Questions", focusSnippet ? `Situational Questions: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         } else {
@@ -49,7 +57,7 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Welcome and Introduction",
                 "Fundamentals & Problem Solving",
                 "Academic Projects or Practical Experience",
-                "Teamwork & Situational Scenarios",
+                withFocus("Teamwork & Situational Scenarios", focusSnippet ? `Teamwork & Focus: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         }
@@ -59,7 +67,7 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Welcome and Introduction",
                 "Practical Problem Solving",
                 "Feature Implementation & Debugging",
-                "Component Design & Trade-offs",
+                withFocus("Component Design & Trade-offs", focusSnippet ? `Component Implementation: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         } else if (type.includes("behav")) {
@@ -67,7 +75,7 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Welcome and Introduction",
                 "Professional Experience",
                 "Teamwork & Communication",
-                "Ownership & Delivery",
+                withFocus("Ownership & Delivery", focusSnippet ? `Ownership & Delivery: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         } else {
@@ -76,18 +84,18 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Welcome and Introduction",
                 "Professional or Project Experience",
                 "Practical Problem Solving & Debugging",
-                "Design Decisions & Trade-offs",
+                withFocus("Design Decisions & Trade-offs", focusSnippet ? `Applied Trade-offs: ${focusSnippet}` : null),
                 "Collaboration & Behavioral Scenarios",
                 "Wrap-up"
             ];
         }
-    } else if (isSenior) {
+    } else if (isLead) {
         if (type.includes("tech")) {
             return [
                 "Welcome and Introduction",
-                "Advanced Problem Solving",
-                "Distributed System Design & Architecture",
-                "Reliability, Scale & Technical Leadership",
+                "Advanced Problem Solving & Algorithmic Trade-offs",
+                "Enterprise & Cross-System Architecture",
+                withFocus("Reliability, Scale & Technical Leadership", focusSnippet ? `Technical Strategy: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         } else if (type.includes("behav")) {
@@ -95,7 +103,7 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Welcome and Introduction",
                 "Technical Ownership & Influence",
                 "High-Stakes Decision Making",
-                "Team Mentorship & Conflict Resolution",
+                withFocus("Team Mentorship & Conflict Resolution", focusSnippet ? `Organizational Leadership: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         } else {
@@ -105,7 +113,35 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Professional Experience & Technical Ownership",
                 "Advanced Problem Solving",
                 "System Design & Architecture",
-                "Leadership, Trade-offs & Behavioral Scenarios",
+                withFocus("Leadership, Trade-offs & Behavioral Scenarios", focusSnippet ? `Strategic Leadership: ${focusSnippet}` : null),
+                "Wrap-up"
+            ];
+        }
+    } else if (isSenior) {
+        if (type.includes("tech")) {
+            return [
+                "Welcome and Introduction",
+                "Advanced Problem Solving",
+                "Distributed System Design & Architecture",
+                withFocus("Reliability, Scale & Technical Leadership", focusSnippet ? `Architecture & Scale: ${focusSnippet}` : null),
+                "Wrap-up"
+            ];
+        } else if (type.includes("behav")) {
+            return [
+                "Welcome and Introduction",
+                "Technical Ownership & Influence",
+                "High-Stakes Decision Making",
+                withFocus("Team Mentorship & Conflict Resolution", focusSnippet ? `Mentorship & Leadership: ${focusSnippet}` : null),
+                "Wrap-up"
+            ];
+        } else {
+            // Mixed
+            return [
+                "Welcome and Introduction",
+                "Professional Experience & Technical Ownership",
+                "Advanced Problem Solving",
+                "System Design & Architecture",
+                withFocus("Leadership, Trade-offs & Behavioral Scenarios", focusSnippet ? `Leadership & Trade-offs: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         }
@@ -116,7 +152,7 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Welcome and Introduction",
                 "Technical Problem Solving",
                 "Component Architecture & Modularity",
-                "Performance Optimization & Edge Cases",
+                withFocus("Performance Optimization & Edge Cases", focusSnippet ? `Deep Dive: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         } else if (type.includes("behav")) {
@@ -124,7 +160,7 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Welcome and Introduction",
                 "Project Ownership & Execution",
                 "Cross-Functional Collaboration",
-                "Decision-Making & Trade-offs",
+                withFocus("Decision-Making & Trade-offs", focusSnippet ? `Decision-Making: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         } else {
@@ -134,7 +170,7 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
                 "Professional & Project Experience",
                 "Technical Problem Solving",
                 "System Design & Applied Architecture",
-                "Behavioral Questions & Trade-offs",
+                withFocus("Behavioral Questions & Trade-offs", focusSnippet ? `Applied Trade-offs: ${focusSnippet}` : null),
                 "Wrap-up"
             ];
         }
@@ -194,8 +230,8 @@ export async function startInterviewController(req, res) {
             }
         }
 
-        // Build adaptive stage plan based on experience level, interview type, and difficulty
-        const stagePlan = buildAdaptiveStagePlan(expLevel, normInterviewType, normDifficulty);
+        // Build adaptive stage plan based on experience level, interview type, difficulty, and focus areas
+        const stagePlan = buildAdaptiveStagePlan(expLevel, normInterviewType, normDifficulty, focusAreas);
 
         // Generate opening welcome & introduction question dynamically if not provided
         let openingQuestion = (firstQuestion || "").trim();
@@ -265,6 +301,8 @@ Requirements:
                     targetCompany: targetCompany || null,
                     interviewType: normInterviewType,
                     difficulty: normDifficulty,
+                    startingDifficulty: normDifficulty,
+                    adaptiveDifficulty: normDifficulty,
                     stagePlan: stagePlan,
                     currentStageIndex: 0,
                     experienceLevel: expLevel,
@@ -285,10 +323,13 @@ Requirements:
             question: openingQuestion,
             stagePlan,
             currentStageIndex: 0,
+            completedStages: 0,
             totalStages: stagePlan.length,
-            currentStage: stagePlan[0] || "Introduction",
+            currentStage: stagePlan[0] || "Welcome and Introduction",
             interviewType: normInterviewType,
             difficulty: normDifficulty,
+            startingDifficulty: normDifficulty,
+            adaptiveDifficulty: normDifficulty,
             resumeDocumentId: resolvedDocId || null,
         });
 
@@ -404,6 +445,13 @@ export async function submitInterviewAnswerController(req, res) {
         }
         session.currentStageIndex = nextStageIndex;
 
+        // Update adaptive difficulty progression
+        const returnedAdaptiveDiff = result?.adaptive_difficulty || result?.difficulty;
+        if (returnedAdaptiveDiff) {
+            session.adaptiveDifficulty = returnedAdaptiveDiff;
+            session.difficulty = returnedAdaptiveDiff;
+        }
+
         // Update MongoDB chat session history
         session.messages.push({ sender: "user", text: answer.trim() });
         if (result?.final_report || result?.status === "completed") {
@@ -429,7 +477,9 @@ export async function submitInterviewAnswerController(req, res) {
             currentStage: session.stagePlan[session.currentStageIndex] || "Interview",
             completedStages: session.status === "completed" ? session.stagePlan.length : session.currentStageIndex,
             interviewType: session.interviewType || "Behavioral",
-            difficulty: session.difficulty || "Medium",
+            startingDifficulty: session.startingDifficulty || session.difficulty || "Medium",
+            adaptiveDifficulty: session.adaptiveDifficulty || session.difficulty || "Medium",
+            difficulty: session.adaptiveDifficulty || session.difficulty || "Medium",
         });
 
     } catch (error) {
@@ -500,7 +550,9 @@ export async function getInterviewSessionController(req, res) {
             targetRole: session.targetRole,
             targetCompany: session.targetCompany,
             interviewType: session.interviewType || "Behavioral",
-            difficulty: session.difficulty || "Medium",
+            difficulty: session.adaptiveDifficulty || session.difficulty || "Medium",
+            startingDifficulty: session.startingDifficulty || session.difficulty || "Medium",
+            adaptiveDifficulty: session.adaptiveDifficulty || session.difficulty || "Medium",
             stagePlan: stages,
             currentStageIndex: session.currentStageIndex || 0,
             totalStages: stages.length,

@@ -152,6 +152,8 @@ async def start_interview(request: StartInterviewRequest):
         }
     }
 
+    init_diff = (request.difficulty or "Medium").capitalize()
+
     result = interview_graph.invoke(
         {
             "session_id": request.session_id,
@@ -160,7 +162,9 @@ async def start_interview(request: StartInterviewRequest):
             "target_role": request.target_role,
             "target_company": request.target_company,
             "interview_type": request.interview_type or "Behavioral",
-            "difficulty": request.difficulty or "Medium",
+            "difficulty": init_diff,
+            "starting_difficulty": init_diff,
+            "adaptive_difficulty": init_diff,
             "stage_plan": request.stage_plan or [],
             "current_stage_index": request.current_stage_index or 0,
             "experience_level": request.experience_level or "fresher",
@@ -187,6 +191,9 @@ async def start_interview(request: StartInterviewRequest):
         "question": request.first_question,
         "stage_plan": request.stage_plan or [],
         "current_stage_index": request.current_stage_index or 0,
+        "starting_difficulty": init_diff,
+        "adaptive_difficulty": init_diff,
+        "difficulty": init_diff,
     }
 
 
@@ -211,23 +218,28 @@ async def submit_interview_answer(
         )
 
         total_duration_ms = round((time.perf_counter() - t_start) * 1000, 2)
+        adaptive_diff = (result.get("adaptive_difficulty") or result.get("difficulty") or "Medium").capitalize()
+        starting_diff = (result.get("starting_difficulty") or adaptive_diff).capitalize()
 
         # Interview finished
         if result.get("final_report"):
-            print(f"[Turn Timing] session_id={session_id} total_turn_duration_ms={total_duration_ms} status=completed")
+            print(f"[Turn Timing] session_id={session_id} total_turn_duration_ms={total_duration_ms} status=completed adaptive_diff={adaptive_diff}")
             return {
                 "session_id": session_id,
                 "status": "completed",
                 "final_report": result["final_report"],
                 "stage_plan": result.get("stage_plan", []),
                 "current_stage_index": result.get("current_stage_index", 0),
+                "starting_difficulty": starting_diff,
+                "adaptive_difficulty": adaptive_diff,
+                "difficulty": adaptive_diff,
                 "memories": result.get("memories", []),
                 "turn_duration_ms": total_duration_ms,
             }
 
         # Interview continues
         question = result.get("current_question")
-        print(f"[Turn Timing] session_id={session_id} total_turn_duration_ms={total_duration_ms} status=waiting_for_answer")
+        print(f"[Turn Timing] session_id={session_id} total_turn_duration_ms={total_duration_ms} status=waiting_for_answer adaptive_diff={adaptive_diff}")
 
         return {
             "session_id": session_id,
@@ -235,6 +247,9 @@ async def submit_interview_answer(
             "question": question,
             "stage_plan": result.get("stage_plan", []),
             "current_stage_index": result.get("current_stage_index", 0),
+            "starting_difficulty": starting_diff,
+            "adaptive_difficulty": adaptive_diff,
+            "difficulty": adaptive_diff,
             "memories": result.get("memories", []),
             "turn_duration_ms": total_duration_ms,
         }

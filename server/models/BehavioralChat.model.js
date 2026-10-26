@@ -59,6 +59,14 @@ const chatSessionSchema = new Schema({
         type: String,
         default: "Medium"
     },
+    startingDifficulty: {
+        type: String,
+        default: "Medium"
+    },
+    adaptiveDifficulty: {
+        type: String,
+        default: "Medium"
+    },
     stagePlan: {
         type: [String],
         default: []

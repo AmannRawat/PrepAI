@@ -1,32 +1,47 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   User,
-  Palette,
   Sliders,
   ShieldCheck,
   Check,
-  Sparkles,
   Camera,
   Moon,
   Sun,
+  Palette,
   Image as ImageIcon,
+  ImageOff,
   Save,
   Upload,
-  Trash2,
   AlertCircle,
   AlertTriangle,
   X,
   RefreshCw,
-  Eye,
   CheckCircle2,
   Lock,
   LogIn,
+  Volume2,
+  Play,
+  LogOut,
+  ArrowRight,
+  FileText,
+  Brain,
+  Trash2,
+  Edit3,
+  Plus,
+  Award,
+  TrendingUp,
+  Target,
+  ExternalLink,
+  Sparkles,
+  BookmarkCheck,
 } from 'lucide-react';
+import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
 import { useTheme } from '../context/ThemeContext';
 import { validateImageFile, formatBytes } from '../utils/backgroundStorage';
+import { processSpeechVoices } from '../utils/speechUtils';
 
 const TARGET_ROLES = [
   'Backend Developer',
@@ -57,9 +72,29 @@ const EXPERIENCE_LEVELS = [
   'Lead / Staff (8+ yrs)',
 ];
 
+const MEMORY_CATEGORIES = [
+  { id: 'all', label: 'All Memories' },
+  { id: 'technical_strength', label: 'Technical Strengths' },
+  { id: 'technical_weakness', label: 'Growth Areas' },
+  { id: 'interview_feedback', label: 'Interview Feedback' },
+  { id: 'experience', label: 'Experience Facts' },
+  { id: 'preference', label: 'Preferences' },
+  { id: 'goal', label: 'Career Goals' },
+];
+
 const SettingsPage = () => {
   const navigate = useNavigate();
-  const { userName, userEmail, logout, isLoggedIn, isLoaded } = useAuth();
+  const {
+    userName,
+    userEmail,
+    userImageUrl,
+    openUserProfile,
+    logout,
+    isLoggedIn,
+    isLoaded,
+    getToken,
+    userId,
+  } = useAuth();
   const { openLogin } = useModal();
   const {
     theme,
@@ -75,43 +110,552 @@ const SettingsPage = () => {
     builtInBackgrounds,
   } = useTheme();
 
+  // Active IA tab: 'profile' | 'appearance' | 'preferences' | 'account'
   const [activeTab, setActiveTab] = useState('profile');
-  const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Custom background upload & preview states
-  const [pendingUpload, setPendingUpload] = useState(null); // { file, previewUrl, meta, warning }
+  // Failed wallpaper thumbnail image tracker for graceful fallback
+  const [failedImages, setFailedImages] = useState({});
+  const handleImageError = useCallback((id) => {
+    setFailedImages((prev) => ({ ...prev, [id]: true }));
+  }, []);
+
+  // Feedback states
+  const [savedSuccess, setSavedSuccess] = useState(false);
+  const [profileError, setProfileError] = useState(null);
+  const [isProfileLoading, setIsProfileLoading] = useState(false);
+  const [isProfileSaving, setIsProfileSaving] = useState(false);
+
+  // Avatar error fallback
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+
+  // Career profile fields (persisted per authenticated user)
+  const [targetRole, setTargetRole] = useState('Backend Developer');
+  const [targetCompany, setTargetCompany] = useState('Google');
+  const [experienceLevel, setExperienceLevel] = useState('Fresher (0-1 yrs)');
+  const [yearsExperience, setYearsExperience] = useState('0');
+
+  // Preferred Resume states
+  const [resumes, setResumes] = useState([]);
+  const [isLoadingResumes, setIsLoadingResumes] = useState(false);
+  const [isSettingPreferred, setIsSettingPreferred] = useState(false);
+  const [resumeActionMessage, setResumeActionMessage] = useState(null);
+
+  // Workspace preferences
+  const [defaultLanguage, setDefaultLanguage] = useState(() => {
+    return localStorage.getItem('prepai_default_language') || 'javascript';
+  });
+
+  // Speech voice selection
+  const [voices, setVoices] = useState([]);
+  const [selectedVoiceName, setSelectedVoiceName] = useState(() => {
+    return localStorage.getItem('preferredVoiceName') || '';
+  });
+  const [isPlayingVoiceSample, setIsPlayingVoiceSample] = useState(false);
+
+  // Custom background upload states
+  const [pendingUpload, setPendingUpload] = useState(null);
   const [uploadError, setUploadError] = useState(null);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [customActionSuccess, setCustomActionSuccess] = useState(null); // 'applied' | 'removed'
+  const [customActionSuccess, setCustomActionSuccess] = useState(null);
   const fileInputRef = useRef(null);
 
-  // Revoke preview object URL when pendingUpload changes or component unmounts
+  // Account & Personalization: Memories (What Pepe Knows)
+  const [memories, setMemories] = useState([]);
+  const [isLoadingMemories, setIsLoadingMemories] = useState(false);
+  const [selectedMemoryCategory, setSelectedMemoryCategory] = useState('all');
+  const [editingMemoryId, setEditingMemoryId] = useState(null);
+  const [editMemoryContent, setEditMemoryContent] = useState('');
+  const [isSavingMemory, setIsSavingMemory] = useState(false);
+  const [showAddMemoryModal, setShowAddMemoryModal] = useState(false);
+  const [newMemoryCategory, setNewMemoryCategory] = useState('technical_strength');
+  const [newMemoryContent, setNewMemoryContent] = useState('');
+
+  // Account & Personalization: Learning & Progress
+  const [progressData, setProgressData] = useState(null);
+  const [dsaStatsData, setDsaStatsData] = useState(null);
+  const [isLoadingProgress, setIsLoadingProgress] = useState(false);
+
+  // Account & Personalization: Preparation Goals (Study Plan)
+  const [goalsProfile, setGoalsProfile] = useState({
+    targetCompanies: '',
+    dailyTime: '',
+    weakTopics: '',
+    dailyTarget: '',
+  });
+  const [isLoadingGoals, setIsLoadingGoals] = useState(false);
+  const [isSavingGoals, setIsSavingGoals] = useState(false);
+  const [goalsSuccessMessage, setGoalsSuccessMessage] = useState(null);
+
+  // Reset avatar load state when image URL changes
   useEffect(() => {
-    return () => {
-      if (pendingUpload?.previewUrl) {
-        URL.revokeObjectURL(pendingUpload.previewUrl);
+    setImageLoadFailed(false);
+  }, [userImageUrl]);
+
+  // Load available speech synthesis voices
+  const loadVoices = useCallback(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
+    const allVoices = window.speechSynthesis.getVoices();
+    const saved = localStorage.getItem('preferredVoiceName') || selectedVoiceName;
+    const { sortedVoices, defaultVoiceName } = processSpeechVoices(allVoices, saved);
+
+    setVoices(sortedVoices);
+    if (defaultVoiceName && (!selectedVoiceName || !sortedVoices.some((v) => v.name === selectedVoiceName))) {
+      setSelectedVoiceName(defaultVoiceName);
+    }
+  }, [selectedVoiceName]);
+
+  useEffect(() => {
+    loadVoices();
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
+      return () => {
+        window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+      };
+    }
+  }, [loadVoices]);
+
+  // 1. Fetch user career preferences
+  useEffect(() => {
+    let isMounted = true;
+    if (!isLoaded) return;
+
+    if (!isLoggedIn) {
+      setTargetRole('Backend Developer');
+      setTargetCompany('Google');
+      setExperienceLevel('Fresher (0-1 yrs)');
+      setYearsExperience('0');
+      setProfileError(null);
+      setIsProfileLoading(false);
+      return;
+    }
+
+    const fetchPreferences = async () => {
+      setIsProfileLoading(true);
+      setProfileError(null);
+
+      try {
+        const token = await getToken();
+        if (!token || !isMounted) return;
+
+        const res = await axios.get(
+          `${import.meta.env.VITE_API_URL}/api/user/preferences`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (isMounted && res.data?.careerPreferences) {
+          const prefs = res.data.careerPreferences;
+          if (prefs.targetRole) setTargetRole(prefs.targetRole);
+          if (prefs.targetCompany) setTargetCompany(prefs.targetCompany);
+          if (prefs.experienceLevel) setExperienceLevel(prefs.experienceLevel);
+          if (prefs.yearsOfExperience !== undefined && prefs.yearsOfExperience !== null) {
+            setYearsExperience(String(prefs.yearsOfExperience));
+          }
+          if (prefs.defaultLanguage) {
+            setDefaultLanguage(prefs.defaultLanguage);
+            localStorage.setItem('prepai_default_language', prefs.defaultLanguage);
+          }
+          if (prefs.preferredVoice) {
+            setSelectedVoiceName(prefs.preferredVoice);
+            localStorage.setItem('preferredVoiceName', prefs.preferredVoice);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load user preferences:', err);
+      } finally {
+        if (isMounted) setIsProfileLoading(false);
       }
     };
-  }, [pendingUpload]);
 
-  // If user logs out while a preview is pending, clean it up
-  useEffect(() => {
-    if (!isLoggedIn && pendingUpload) {
-      if (pendingUpload.previewUrl) {
-        URL.revokeObjectURL(pendingUpload.previewUrl);
+    fetchPreferences();
+    return () => { isMounted = false; };
+  }, [isLoggedIn, isLoaded, userId, getToken]);
+
+  // 2. Fetch authenticated user resumes
+  const fetchUserResumes = useCallback(async () => {
+    if (!isLoggedIn) return;
+    setIsLoadingResumes(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const res = await axios.get(
+        `${import.meta.env.VITE_API_URL}/api/resume/my-resumes`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.success) {
+        setResumes(res.data.resumes || []);
       }
-      setPendingUpload(null);
+    } catch (err) {
+      console.error('Failed to fetch user resumes:', err);
+    } finally {
+      setIsLoadingResumes(false);
     }
-  }, [isLoggedIn, pendingUpload]);
+  }, [isLoggedIn, getToken]);
 
-  // Image Upload Validation & Processing
+  useEffect(() => {
+    if (isLoggedIn && activeTab === 'profile') {
+      fetchUserResumes();
+    }
+  }, [isLoggedIn, activeTab, fetchUserResumes]);
+
+  // 3. Fetch Personalization Memories (What Pepe Knows)
+  const fetchMemories = useCallback(async () => {
+    if (!isLoggedIn) return;
+    setIsLoadingMemories(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const res = await axios.get(
+        `${import.meta.env.VITE_API_URL}/api/user/memories`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.success) {
+        setMemories(res.data.memories || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch user memories:', err);
+    } finally {
+      setIsLoadingMemories(false);
+    }
+  }, [isLoggedIn, getToken]);
+
+  // 4. Fetch Learning & Progress Data
+  const fetchProgressAndStats = useCallback(async () => {
+    if (!isLoggedIn) return;
+    setIsLoadingProgress(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const [progressRes, statsRes] = await Promise.all([
+        axios.get(`${import.meta.env.VITE_API_URL}/api/user/progress`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => ({ data: null })),
+        axios.get(`${import.meta.env.VITE_API_URL}/api/user/dsa-stats`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => ({ data: null })),
+      ]);
+
+      if (progressRes?.data) setProgressData(progressRes.data);
+      if (statsRes?.data) setDsaStatsData(statsRes.data);
+    } catch (err) {
+      console.error('Failed to load learning & progress data:', err);
+    } finally {
+      setIsLoadingProgress(false);
+    }
+  }, [isLoggedIn, getToken]);
+
+  // 5. Fetch Preparation Goals (Study Plan)
+  const fetchPreparationGoals = useCallback(async () => {
+    if (!isLoggedIn) return;
+    setIsLoadingGoals(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const res = await axios.get(
+        `${import.meta.env.VITE_API_URL}/api/user/study-plan`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data) {
+        const onb = res.data.onboardingProfile || {};
+        const pl = res.data.plan || {};
+        setGoalsProfile({
+          targetCompanies: onb.targetCompanies || '',
+          dailyTime: onb.dailyTime || '',
+          weakTopics: onb.weakTopics || '',
+          dailyTarget: pl.dailyTarget || '',
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load study plan goals:', err);
+    } finally {
+      setIsLoadingGoals(false);
+    }
+  }, [isLoggedIn, getToken]);
+
+  // Trigger Account tab data loads
+  useEffect(() => {
+    if (isLoggedIn && activeTab === 'account') {
+      fetchMemories();
+      fetchProgressAndStats();
+      fetchPreparationGoals();
+    }
+  }, [isLoggedIn, activeTab, fetchMemories, fetchProgressAndStats, fetchPreparationGoals]);
+
+  // Handle saving career profile preferences
+  const handleSaveProfile = async (e) => {
+    e.preventDefault();
+    if (!isLoggedIn) {
+      if (openLogin) openLogin();
+      return;
+    }
+
+    setIsProfileSaving(true);
+    setProfileError(null);
+
+    const parsedYears = Math.max(0, parseInt(yearsExperience, 10) || 0);
+
+    try {
+      const token = await getToken();
+      if (!token) throw new Error('Authentication session expired.');
+
+      await axios.put(
+        `${import.meta.env.VITE_API_URL}/api/user/preferences`,
+        {
+          targetRole,
+          targetCompany,
+          experienceLevel,
+          yearsOfExperience: parsedYears,
+          defaultLanguage,
+          preferredVoice: selectedVoiceName,
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      localStorage.setItem('prepai_target_role', targetRole);
+      localStorage.setItem('prepai_target_company', targetCompany);
+      localStorage.setItem('prepai_experience_level', experienceLevel);
+      localStorage.setItem('prepai_years_experience', String(parsedYears));
+
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } catch (err) {
+      console.error('Error saving career profile:', err);
+      setProfileError('Failed to save profile preferences. Please try again.');
+    } finally {
+      setIsProfileSaving(false);
+    }
+  };
+
+  // Handle setting preferred resume
+  const handleSelectPreferredResume = async (resumeId) => {
+    if (!isLoggedIn) return;
+    setIsSettingPreferred(true);
+    setResumeActionMessage(null);
+
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const res = await axios.put(
+        `${import.meta.env.VITE_API_URL}/api/resume/preferred`,
+        { resumeId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data?.success) {
+        setResumes((prev) =>
+          prev.map((r) => ({
+            ...r,
+            isPreferred: String(r._id) === String(resumeId),
+          }))
+        );
+        setResumeActionMessage('Preferred resume updated. Future mock interviews and coach sessions will use this resume.');
+        setTimeout(() => setResumeActionMessage(null), 4000);
+      }
+    } catch (err) {
+      console.error('Failed to set preferred resume:', err);
+      setResumeActionMessage('Failed to set preferred resume. Please try again.');
+      setTimeout(() => setResumeActionMessage(null), 4000);
+    } finally {
+      setIsSettingPreferred(false);
+    }
+  };
+
+  // Handle language change
+  const handleLanguageChange = async (newLang) => {
+    setDefaultLanguage(newLang);
+    localStorage.setItem('prepai_default_language', newLang);
+
+    if (isLoggedIn) {
+      try {
+        const token = await getToken();
+        if (token) {
+          await axios.put(
+            `${import.meta.env.VITE_API_URL}/api/user/preferences`,
+            { defaultLanguage: newLang },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        }
+      } catch (err) {
+        console.warn('Could not sync language preference to account:', err);
+      }
+    }
+  };
+
+  // Handle voice change
+  const handleVoiceChange = async (newVoiceName) => {
+    setSelectedVoiceName(newVoiceName);
+    localStorage.setItem('preferredVoiceName', newVoiceName);
+
+    if (isLoggedIn) {
+      try {
+        const token = await getToken();
+        if (token) {
+          await axios.put(
+            `${import.meta.env.VITE_API_URL}/api/user/preferences`,
+            { preferredVoice: newVoiceName },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        }
+      } catch (err) {
+        console.warn('Could not sync voice preference to account:', err);
+      }
+    }
+  };
+
+  // Handle playing voice sample
+  const handlePlayVoiceSample = () => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
+    window.speechSynthesis.cancel();
+    const sampleText =
+      'Hello, I am Pepe, your AI interview mentor. Let us prepare for your upcoming software engineering interview.';
+    const utterance = new SpeechSynthesisUtterance(sampleText);
+
+    if (selectedVoiceName && voices.length > 0) {
+      const match = voices.find((v) => v.name === selectedVoiceName);
+      if (match) utterance.voice = match;
+    }
+
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => setIsPlayingVoiceSample(true);
+    utterance.onend = () => setIsPlayingVoiceSample(false);
+    utterance.onerror = () => setIsPlayingVoiceSample(false);
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Memory management handlers
+  const handleCreateMemory = async (e) => {
+    e.preventDefault();
+    if (!newMemoryContent.trim()) return;
+
+    setIsSavingMemory(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const res = await axios.post(
+        `${import.meta.env.VITE_API_URL}/api/user/memories`,
+        {
+          category: newMemoryCategory,
+          content: newMemoryContent.trim(),
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data?.success) {
+        setMemories((prev) => [res.data.memory, ...prev]);
+        setNewMemoryContent('');
+        setShowAddMemoryModal(false);
+      }
+    } catch (err) {
+      console.error('Failed to create memory:', err);
+    } finally {
+      setIsSavingMemory(false);
+    }
+  };
+
+  const handleUpdateMemory = async (memoryId) => {
+    if (!editMemoryContent.trim()) return;
+
+    setIsSavingMemory(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const res = await axios.put(
+        `${import.meta.env.VITE_API_URL}/api/user/memories/${memoryId}`,
+        { content: editMemoryContent.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data?.success) {
+        setMemories((prev) =>
+          prev.map((m) => (m._id === memoryId ? res.data.memory : m))
+        );
+        setEditingMemoryId(null);
+        setEditMemoryContent('');
+      }
+    } catch (err) {
+      console.error('Failed to update memory:', err);
+    } finally {
+      setIsSavingMemory(false);
+    }
+  };
+
+  const handleDeleteMemory = async (memoryId) => {
+    if (!window.confirm('Are you sure you want to remove this personalization memory? Pepe will no longer reference it.')) {
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const res = await axios.delete(
+        `${import.meta.env.VITE_API_URL}/api/user/memories/${memoryId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data?.success) {
+        setMemories((prev) => prev.filter((m) => m._id !== memoryId));
+      }
+    } catch (err) {
+      console.error('Failed to delete memory:', err);
+    }
+  };
+
+  // Preparation Goals Save Handler
+  const handleSaveGoals = async (e) => {
+    e.preventDefault();
+    if (!isLoggedIn) return;
+
+    setIsSavingGoals(true);
+    setGoalsSuccessMessage(null);
+
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const res = await axios.put(
+        `${import.meta.env.VITE_API_URL}/api/user/study-plan`,
+        {
+          onboardingProfile: {
+            targetCompanies: goalsProfile.targetCompanies,
+            dailyTime: goalsProfile.dailyTime,
+            weakTopics: goalsProfile.weakTopics,
+          },
+          plan: {
+            dailyTarget: goalsProfile.dailyTarget,
+          },
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data?.success) {
+        setGoalsSuccessMessage('Preparation goals saved! Your DSA Coach and Study Plan have been updated.');
+        setTimeout(() => setGoalsSuccessMessage(null), 4000);
+      }
+    } catch (err) {
+      console.error('Failed to save study goals:', err);
+    } finally {
+      setIsSavingGoals(false);
+    }
+  };
+
+  // Background upload handlers
   const handleFileSelected = async (file) => {
     if (!file) return;
 
-    // Strict authentication restriction
     if (!isLoggedIn) {
       setUploadError('Please sign in to upload custom backgrounds.');
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -129,7 +673,6 @@ const SettingsPage = () => {
         return;
       }
 
-      // Revoke any previous preview URL
       if (pendingUpload?.previewUrl) {
         URL.revokeObjectURL(pendingUpload.previewUrl);
       }
@@ -156,137 +699,76 @@ const SettingsPage = () => {
     }
   };
 
-  const handleCancelPendingUpload = () => {
-    if (pendingUpload?.previewUrl) {
-      URL.revokeObjectURL(pendingUpload.previewUrl);
-    }
-    setPendingUpload(null);
-    setUploadError(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
   const handleApplyPendingUpload = async () => {
     if (!pendingUpload) return;
-
-    // Strict authentication restriction
     if (!isLoggedIn) {
-      setUploadError('Please sign in to apply custom backgrounds.');
+      setUploadError('Please sign in to upload custom backgrounds.');
       return;
     }
-
     setIsApplying(true);
     setUploadError(null);
-
     try {
-      await applyCustomBg(pendingUpload.file, pendingUpload.meta);
-      if (pendingUpload.previewUrl) {
+      const result = await applyCustomBg(pendingUpload.file);
+      if (result) {
         URL.revokeObjectURL(pendingUpload.previewUrl);
+        setPendingUpload(null);
+        setCustomActionSuccess('applied');
+        setTimeout(() => setCustomActionSuccess(null), 3000);
+      } else {
+        setUploadError('Failed to apply custom background.');
       }
-      setPendingUpload(null);
-      setCustomActionSuccess('applied');
-      setTimeout(() => setCustomActionSuccess(null), 3500);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
-      console.error('Apply custom background error:', err);
-      setUploadError('Failed to store custom background in browser storage.');
+      setUploadError(err.message || 'Failed to store background.');
     } finally {
       setIsApplying(false);
     }
   };
 
-  const handleRemoveCustomBg = async () => {
+  const handleRemoveCustomBackground = async () => {
     setIsRemoving(true);
-    setUploadError(null);
-
     try {
-      await removeCustomBg();
-      setCustomActionSuccess('removed');
-      setTimeout(() => setCustomActionSuccess(null), 3500);
+      const result = await removeCustomBg();
+      if (result.success) {
+        setCustomActionSuccess('removed');
+        setTimeout(() => setCustomActionSuccess(null), 3000);
+      }
     } catch (err) {
-      console.error('Remove custom background error:', err);
-      setUploadError('Failed to delete custom background.');
+      console.error('Error removing custom background:', err);
     } finally {
       setIsRemoving(false);
     }
   };
 
-  const handleDragOver = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!isLoggedIn) return;
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-    if (!isLoggedIn) return;
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      handleFileSelected(files[0]);
-    }
-  };
-
-  // Load preferences from localStorage
-  const [targetRole, setTargetRole] = useState(() => {
-    return localStorage.getItem('prepai_target_role') || 'Backend Developer';
-  });
-  const [targetCompany, setTargetCompany] = useState(() => {
-    return localStorage.getItem('prepai_target_company') || 'Google';
-  });
-  const [experienceLevel, setExperienceLevel] = useState(() => {
-    return localStorage.getItem('prepai_experience_level') || 'Fresher (0-1 yrs)';
-  });
-  const [yearsExperience, setYearsExperience] = useState(() => {
-    return localStorage.getItem('prepai_years_experience') || '0';
-  });
-  const [defaultLanguage, setDefaultLanguage] = useState(() => {
-    return localStorage.getItem('prepai_default_language') || 'javascript';
+  // Filter memories
+  const filteredMemories = memories.filter((m) => {
+    if (selectedMemoryCategory === 'all') return true;
+    return m.category === selectedMemoryCategory;
   });
 
-  const handleSaveProfile = (e) => {
-    e.preventDefault();
-    localStorage.setItem('prepai_target_role', targetRole);
-    localStorage.setItem('prepai_target_company', targetCompany);
-    localStorage.setItem('prepai_experience_level', experienceLevel);
-    localStorage.setItem('prepai_years_experience', yearsExperience);
-    localStorage.setItem('prepai_default_language', defaultLanguage);
-
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
-  };
-
-  const userInitial = userName ? userName.charAt(0).toUpperCase() : (isLoggedIn ? 'U' : '?');
+  const userInitial = userName ? userName.charAt(0).toUpperCase() : 'U';
 
   return (
-    <div className="flex flex-col flex-1 max-w-5xl mx-auto w-full pb-12 animate-fade-in">
-      {/* Header matching reference mockup */}
+    <div className="flex flex-col flex-1 max-w-5xl mx-auto w-full px-4 py-8">
+      {/* Header */}
       <div className="mb-6">
         <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">
           <Sliders size={14} />
-          <span>Configuration</span>
+          <span>Configuration & Identity</span>
         </div>
         <h1 className="text-2xl md:text-3xl font-bold text-text-primary tracking-tight">
           Settings
         </h1>
         <p className="text-sm text-text-secondary mt-0.5">
-          Customize your profile, appearance, preferences, and interview targets.
+          Manage your professional identity, application behavior, and personalized preparation memory.
         </p>
       </div>
 
-      {/* Tabs Bar: Profile | Appearance | Preferences | Account (Notifications explicitly removed per specification) */}
-      <div className="flex items-center gap-2 border-b border-border/60 pb-3 mb-6 overflow-x-auto">
+      {/* Tabs Navigation */}
+      <div className="flex items-center gap-1.5 sm:gap-2 border-b border-border/60 pb-3 mb-6 overflow-x-auto no-scrollbar scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0">
         <button
           type="button"
           onClick={() => setActiveTab('profile')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition ${
+          className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition cursor-pointer ${
             activeTab === 'profile'
               ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 shadow-sm'
               : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/40'
@@ -299,7 +781,7 @@ const SettingsPage = () => {
         <button
           type="button"
           onClick={() => setActiveTab('appearance')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition ${
+          className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition cursor-pointer ${
             activeTab === 'appearance'
               ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 shadow-sm'
               : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/40'
@@ -312,7 +794,7 @@ const SettingsPage = () => {
         <button
           type="button"
           onClick={() => setActiveTab('preferences')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition ${
+          className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition cursor-pointer ${
             activeTab === 'preferences'
               ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 shadow-sm'
               : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/40'
@@ -325,776 +807,1184 @@ const SettingsPage = () => {
         <button
           type="button"
           onClick={() => setActiveTab('account')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition ${
+          className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition cursor-pointer ${
             activeTab === 'account'
               ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 shadow-sm'
               : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/40'
           }`}
         >
-          <ShieldCheck size={15} />
-          <span>Account</span>
+          <Brain size={15} />
+          <span>Account & Personalization</span>
         </button>
       </div>
 
-      {/* TAB 1: PROFILE */}
+      {/* ============================================================== */}
+      {/* TAB 1: PROFILE — Professional Identity & Preferred Resume      */}
+      {/* ============================================================== */}
       {activeTab === 'profile' && (
-        <form onSubmit={handleSaveProfile} className="space-y-6">
-          {/* User Profile Card */}
-          <div className="p-5 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60 flex flex-col sm:flex-row items-center sm:items-start gap-5">
-            <div className="relative">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white font-bold text-xl flex items-center justify-center shadow-md">
-                {userInitial}
-              </div>
-              <button
-                type="button"
-                className="absolute bottom-0 right-0 p-1.5 rounded-full bg-surface border border-border text-text-secondary hover:text-emerald-400 transition shadow"
-                title="Change Photo"
-              >
-                <Camera size={13} />
-              </button>
+        <div className="space-y-6">
+          {!isLoaded ? (
+            <div className="p-8 rounded-2xl bg-surface/70 border border-border/60 animate-pulse text-center">
+              <div className="h-5 bg-surface-elevated rounded w-1/3 mx-auto mb-3" />
+              <div className="h-4 bg-surface-elevated rounded w-1/2 mx-auto" />
             </div>
-
-            <div className="flex-1 text-center sm:text-left">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-base font-bold text-text-primary">
-                    {userName || (isLoggedIn ? 'Candidate Profile' : 'Guest User')}
-                  </h3>
-                  <p className="text-xs text-text-secondary">
-                    {userEmail || (isLoggedIn ? 'Personal candidate workspace' : 'Sign in to access your candidate profile')}
+          ) : !isLoggedIn ? (
+            /* Guest Profile State */
+            <div className="space-y-6">
+              <div className="p-5 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60 flex flex-col sm:flex-row items-center sm:items-start gap-5">
+                <div className="w-16 h-16 rounded-full bg-surface-elevated border border-border text-text-muted font-bold text-xl flex items-center justify-center shadow-sm">
+                  ?
+                </div>
+                <div className="flex-1 text-center sm:text-left">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-base font-bold text-text-primary">Guest Candidate</h3>
+                      <p className="text-xs text-text-secondary">Browsing without an authenticated account</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => (openLogin ? openLogin() : navigate('/login'))}
+                      className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-black font-semibold text-xs flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer"
+                    >
+                      <LogIn size={14} />
+                      <span>Sign In to Save Profile</span>
+                    </button>
+                  </div>
+                  <p className="text-xs text-text-secondary mt-3 leading-relaxed">
+                    Signing in enables account-backed career preferences, uploaded resume indexing with ATS analysis, and custom mock interview calibration tailored to your experience level.
                   </p>
                 </div>
-                {isLoggedIn ? (
-                  <span className="inline-flex self-center sm:self-auto items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 border border-emerald-500/25 text-emerald-400">
-                    Active Plan
-                  </span>
-                ) : (
+              </div>
+            </div>
+          ) : (
+            /* Authenticated Profile State */
+            <div className="space-y-6">
+              {/* Authenticated Identity Card */}
+              <div className="p-5 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60 flex flex-col sm:flex-row items-center sm:items-start gap-5">
+                <div className="relative group shrink-0">
+                  {userImageUrl && !imageLoadFailed ? (
+                    <img
+                      src={userImageUrl}
+                      alt={userName || 'User'}
+                      className="w-20 h-20 rounded-full object-cover border-2 border-emerald-500/40 shadow-sm"
+                      onError={() => setImageLoadFailed(true)}
+                    />
+                  ) : (
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold text-2xl flex items-center justify-center border-2 border-border shadow-sm">
+                      {userInitial}
+                    </div>
+                  )}
+
                   <button
                     type="button"
-                    onClick={() => {
-                      if (openLogin) openLogin();
-                      else navigate('/login');
-                    }}
-                    className="inline-flex self-center sm:self-auto items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition cursor-pointer"
+                    onClick={() => openUserProfile && openUserProfile()}
+                    className="absolute bottom-0 right-0 p-1.5 rounded-full bg-emerald-500 text-black hover:bg-emerald-400 transition shadow-sm cursor-pointer"
+                    title="Change profile picture"
+                    aria-label="Change profile picture"
                   >
-                    <LogIn size={13} />
-                    <span>Sign In</span>
+                    <Camera size={14} />
                   </button>
+                </div>
+
+                <div className="flex-1 text-center sm:text-left">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-lg font-bold text-text-primary">{userName || 'Candidate'}</h3>
+                      <p className="text-xs text-text-secondary">{userEmail || 'Authenticated User'}</p>
+                    </div>
+
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs font-semibold self-center sm:self-auto">
+                      <ShieldCheck size={12} />
+                      <span>Verified Account</span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-text-secondary mt-2">
+                    Your profile picture and primary credentials are authenticated via your provider. Click the camera icon to manage your avatar and social connections.
+                  </p>
+                </div>
+              </div>
+
+              {/* Career Targets Form */}
+              <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-base font-bold text-text-primary">Career Target Preferences</h3>
+                    <p className="text-xs text-text-secondary">
+                      Pepe calibrates mock interview difficulty, focus questions, and coding evaluation based on these targets.
+                    </p>
+                  </div>
+                </div>
+
+                {profileError && (
+                  <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-2">
+                    <AlertCircle size={16} className="shrink-0" />
+                    <span>{profileError}</span>
+                  </div>
+                )}
+
+                {savedSuccess && (
+                  <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2">
+                    <CheckCircle2 size={16} className="shrink-0" />
+                    <span>Preferences successfully saved to your PrepAI account.</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveProfile} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-text-secondary mb-1.5">
+                        Target Role
+                      </label>
+                      <select
+                        value={targetRole}
+                        onChange={(e) => setTargetRole(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-surface-elevated/70 border border-border text-xs text-text-primary focus:outline-none focus:border-emerald-500 transition"
+                      >
+                        {TARGET_ROLES.map((role) => (
+                          <option key={role} value={role}>{role}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-text-secondary mb-1.5">
+                        Target Company Tier
+                      </label>
+                      <select
+                        value={targetCompany}
+                        onChange={(e) => setTargetCompany(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-surface-elevated/70 border border-border text-xs text-text-primary focus:outline-none focus:border-emerald-500 transition"
+                      >
+                        {TARGET_COMPANIES.map((company) => (
+                          <option key={company} value={company}>{company}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-text-secondary mb-1.5">
+                        Experience Level
+                      </label>
+                      <select
+                        value={experienceLevel}
+                        onChange={(e) => setExperienceLevel(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-surface-elevated/70 border border-border text-xs text-text-primary focus:outline-none focus:border-emerald-500 transition"
+                      >
+                        {EXPERIENCE_LEVELS.map((level) => (
+                          <option key={level} value={level}>{level}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-text-secondary mb-1.5">
+                        Years of Professional Experience
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="50"
+                        value={yearsExperience}
+                        onChange={(e) => setYearsExperience(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-surface-elevated/70 border border-border text-xs text-text-primary focus:outline-none focus:border-emerald-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={isProfileSaving || isProfileLoading}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-black font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                    >
+                      {isProfileSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                      <span>{isProfileSaving ? 'Saving Preferences...' : 'Save Career Preferences'}</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Preferred Resume Section */}
+              <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <FileText size={18} className="text-emerald-400" />
+                      <h3 className="text-base font-bold text-text-primary">Preferred Resume</h3>
+                    </div>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      Select which of your uploaded resumes Pepe should reference as your default context for mock interviews and AI coaching.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate('/resume-reviewer')}
+                    className="px-3 py-1.5 rounded-xl bg-surface-elevated/70 hover:bg-surface-elevated border border-border text-xs font-medium text-text-primary flex items-center gap-1.5 transition self-start sm:self-auto cursor-pointer"
+                  >
+                    <Upload size={13} />
+                    <span>Upload New Resume</span>
+                  </button>
+                </div>
+
+                {resumeActionMessage && (
+                  <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs flex items-center gap-2">
+                    <CheckCircle2 size={15} />
+                    <span>{resumeActionMessage}</span>
+                  </div>
+                )}
+
+                {isLoadingResumes ? (
+                  <div className="p-8 text-center text-xs text-text-secondary animate-pulse">
+                    Loading your indexed resumes...
+                  </div>
+                ) : resumes.length === 0 ? (
+                  <div className="p-6 rounded-xl border border-dashed border-border/80 text-center space-y-3">
+                    <div className="w-12 h-12 rounded-full bg-surface-elevated mx-auto flex items-center justify-center text-text-secondary">
+                      <FileText size={20} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-text-primary">No Resumes Uploaded Yet</h4>
+                      <p className="text-xs text-text-secondary max-w-md mx-auto mt-1">
+                        Upload your resume in the Resume Reviewer to get real-time ATS scoring, keyword match analysis, and interview question tailoring.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/resume-reviewer')}
+                      className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-black font-semibold text-xs inline-flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Upload size={14} />
+                      <span>Go to Resume Reviewer</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {resumes.map((resume) => (
+                      <div
+                        key={resume._id}
+                        className={`p-4 rounded-xl border transition flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+                          resume.isPreferred
+                            ? 'bg-emerald-500/10 border-emerald-500/40 shadow-xs'
+                            : 'bg-surface-elevated/40 border-border hover:border-border/80'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3 min-w-0">
+                          <div className={`p-2 rounded-lg shrink-0 ${resume.isPreferred ? 'bg-emerald-500/20 text-emerald-400' : 'bg-surface-elevated text-text-secondary'}`}>
+                            <FileText size={18} />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-bold text-text-primary truncate">
+                                {resume.fileName}
+                              </span>
+                              {resume.isPreferred && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                                  <BookmarkCheck size={11} /> Preferred Default
+                                </span>
+                              )}
+                              {resume.isHighestScore && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 text-[10px] font-bold">
+                                  <Award size={11} /> Highest ATS
+                                </span>
+                              )}
+                              {resume.isNewest && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold">
+                                  Latest Upload
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 text-[11px] text-text-secondary mt-1">
+                              <span>Target: <strong className="text-text-primary">{resume.jobTitle}</strong></span>
+                              <span>•</span>
+                              <span>Uploaded: {new Date(resume.createdAt).toLocaleDateString()}</span>
+                              <span>•</span>
+                              <span className={`font-semibold ${resume.atsScore >= 75 ? 'text-emerald-400' : resume.atsScore >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                                ATS Score: {resume.atsScore}/100
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="self-end sm:self-auto shrink-0">
+                          {resume.isPreferred ? (
+                            <span className="px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-xs font-semibold inline-flex items-center gap-1">
+                              <Check size={14} /> Active Preferred
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={isSettingPreferred}
+                              onClick={() => handleSelectPreferredResume(resume._id)}
+                              className="px-3 py-1.5 rounded-lg bg-surface-elevated hover:bg-surface-elevated/80 border border-border text-xs font-semibold text-text-primary transition cursor-pointer"
+                            >
+                              Set as Preferred
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
-              <p className="text-xs text-text-muted mt-2">
-                Account identity is synchronized with Clerk authentication. Target role and experience calibrate AI interview difficulty and DSA problem recommendations.
-              </p>
             </div>
-          </div>
-
-          {/* Profile Details Inputs */}
-          <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60 space-y-5">
-            <h3 className="text-sm font-bold text-text-primary flex items-center gap-2 border-b border-border/40 pb-3">
-              <User size={16} className="text-emerald-400" />
-              <span>Target Role & Career Preferences</span>
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
-                <label className="block text-xs font-semibold text-text-secondary mb-1.5">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  value={userName || (isLoggedIn ? 'Candidate' : 'Guest')}
-                  readOnly
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-elevated/40 border border-border/60 text-text-secondary text-xs cursor-not-allowed"
-                  title="Managed via Clerk identity"
-                />
-                <span className="text-[10px] text-text-muted mt-1 block">
-                  Managed via Clerk account provider.
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-text-secondary mb-1.5">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  value={userEmail || (isLoggedIn ? 'Not provided' : 'Sign in to link email')}
-                  readOnly
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-elevated/40 border border-border/60 text-text-secondary text-xs cursor-not-allowed"
-                  title="Managed via Clerk identity"
-                />
-                <span className="text-[10px] text-text-muted mt-1 block">
-                  Primary notification and report recipient.
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-text-secondary mb-1.5">
-                  Target Role
-                </label>
-                <select
-                  value={targetRole}
-                  onChange={(e) => setTargetRole(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-elevated/60 border border-border text-text-primary text-xs focus:outline-none focus:border-emerald-500/60"
-                >
-                  {TARGET_ROLES.map((r) => (
-                    <option key={r} value={r} className="bg-surface text-text-primary">
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-text-secondary mb-1.5">
-                  Target Company
-                </label>
-                <select
-                  value={targetCompany}
-                  onChange={(e) => setTargetCompany(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-elevated/60 border border-border text-text-primary text-xs focus:outline-none focus:border-emerald-500/60"
-                >
-                  {TARGET_COMPANIES.map((c) => (
-                    <option key={c} value={c} className="bg-surface text-text-primary">
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-text-secondary mb-1.5">
-                  Experience Level
-                </label>
-                <select
-                  value={experienceLevel}
-                  onChange={(e) => setExperienceLevel(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-elevated/60 border border-border text-text-primary text-xs focus:outline-none focus:border-emerald-500/60"
-                >
-                  {EXPERIENCE_LEVELS.map((lvl) => (
-                    <option key={lvl} value={lvl} className="bg-surface text-text-primary">
-                      {lvl}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-text-secondary mb-1.5">
-                  Years of Experience
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="40"
-                  value={yearsExperience}
-                  onChange={(e) => setYearsExperience(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-elevated/60 border border-border text-text-primary text-xs focus:outline-none focus:border-emerald-500/60"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-border/40">
-              {savedSuccess && (
-                <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-semibold animate-fade-in">
-                  <Check size={14} /> Saved preferences!
-                </span>
-              )}
-              <button
-                type="submit"
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs shadow-md transition"
-              >
-                <Save size={14} />
-                <span>Save Preferences</span>
-              </button>
-            </div>
-          </div>
-        </form>
+          )}
+        </div>
       )}
 
-      {/* TAB 2: APPEARANCE */}
+      {/* ============================================================== */}
+      {/* TAB 2: PREFERENCES — How PrepAI Behaves                         */}
+      {/* ============================================================== */}
+      {activeTab === 'preferences' && (
+        <div className="space-y-6">
+          {/* Guest Notice */}
+          {!isLoggedIn && (
+            <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs flex items-center justify-between gap-3">
+              <span>Theme and preferences are temporarily stored for your browser. Sign in to sync them to your cloud account.</span>
+              <button
+                type="button"
+                onClick={() => (openLogin ? openLogin() : navigate('/login'))}
+                className="px-3 py-1 rounded-lg bg-blue-500 text-white font-semibold shrink-0 cursor-pointer"
+              >
+                Sign In
+              </button>
+            </div>
+          )}
+
+          {/* DSA Editor Language Configuration */}
+          <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+            <h3 className="text-base font-bold text-text-primary mb-1">DSA Programming Language</h3>
+            <p className="text-xs text-text-secondary mb-4">
+              Sets the default programming language and boilerplate template when entering DSA Arena or solving a new coding problem.
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { id: 'javascript', label: 'JavaScript', ext: '.js' },
+                { id: 'python', label: 'Python', ext: '.py' },
+                { id: 'cpp', label: 'C++', ext: '.cpp' },
+                { id: 'java', label: 'Java', ext: '.java' },
+              ].map((lang) => (
+                <button
+                  key={lang.id}
+                  type="button"
+                  onClick={() => handleLanguageChange(lang.id)}
+                  className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                    defaultLanguage === lang.id
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 shadow-xs'
+                      : 'bg-surface-elevated/40 border-border hover:border-border/80 text-text-primary'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold">{lang.label}</span>
+                    {defaultLanguage === lang.id && <Check size={14} className="text-emerald-400" />}
+                  </div>
+                  <span className="text-[10px] text-text-secondary mt-1 block">Default editor syntax</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Speech Synthesis Voice Selection */}
+          <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+            <h3 className="text-base font-bold text-text-primary mb-1">Behavioral Coach Voice</h3>
+            <p className="text-xs text-text-secondary mb-4">
+              Select the speech synthesis voice Pepe uses during mock interviews. Microsoft voices are excluded; Google UK English is preferred where available.
+            </p>
+
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="flex-1">
+                  <select
+                    value={selectedVoiceName}
+                    onChange={(e) => handleVoiceChange(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-surface-elevated/70 border border-border text-xs text-text-primary focus:outline-none focus:border-emerald-500 transition"
+                  >
+                    {voices.length === 0 ? (
+                      <option value="">Default System Voice</option>
+                    ) : (
+                      voices.map((v) => (
+                        <option key={v.name} value={v.name}>
+                          {v.name} ({v.lang})
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handlePlayVoiceSample}
+                  disabled={isPlayingVoiceSample}
+                  className="px-4 py-2.5 rounded-xl bg-surface-elevated hover:bg-surface-elevated/80 border border-border text-xs font-semibold text-text-primary flex items-center justify-center gap-1.5 transition shrink-0 cursor-pointer"
+                >
+                  {isPlayingVoiceSample ? <RefreshCw size={14} className="animate-spin text-emerald-400" /> : <Play size={14} />}
+                  <span>{isPlayingVoiceSample ? 'Speaking...' : 'Test Voice Audio'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* TAB: APPEARANCE — Theme & Dashboard Wallpaper                  */}
+      {/* ============================================================== */}
       {activeTab === 'appearance' && (
         <div className="space-y-6">
-          {/* Notification Banners */}
-          {customActionSuccess === 'applied' && (
-            <div className="flex items-center justify-between p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs animate-fade-in">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={16} />
-                <span>Custom background successfully applied and stored in local IndexedDB.</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCustomActionSuccess(null)}
-                className="p-1 hover:text-white"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          )}
+          {/* Theme & Mode Configuration */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+            <h3 className="text-base font-bold text-text-primary mb-1">Color Theme & Mode</h3>
+            <p className="text-xs text-text-secondary mb-4">
+              Switch between Dark and Light mode. Your choice is persisted seamlessly across all pages.
+            </p>
 
-          {customActionSuccess === 'removed' && (
-            <div className="flex items-center justify-between p-4 rounded-xl bg-surface-elevated border border-border text-text-secondary text-xs animate-fade-in">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={16} className="text-emerald-400" />
-                <span>Custom background removed. Reverted to Alpine Sunset.</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCustomActionSuccess(null)}
-                className="p-1 hover:text-white"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          )}
-
-          {/* Theme Selection: Exactly Dark and Light */}
-          <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60 space-y-4">
-            <div>
-              <h3 className="text-sm font-bold text-text-primary flex items-center gap-2">
-                <Palette size={16} className="text-emerald-600 dark:text-emerald-400" />
-                <span>Application Theme</span>
-              </h3>
-              <p className="text-xs text-text-secondary mt-1">
-                Choose between the primary dark developer theme and the clean light theme.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg">
-              {/* Dark Theme Button */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md">
               <button
                 type="button"
                 onClick={() => setTheme('dark')}
-                className={`flex items-center justify-between p-4 rounded-xl border text-left transition ${
+                className={`p-3.5 rounded-xl border flex items-center justify-between transition cursor-pointer ${
                   theme === 'dark'
-                    ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.12)]'
-                    : 'bg-surface-elevated/40 border-border text-text-secondary hover:text-text-primary'
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 ring-1 ring-emerald-500/30 shadow-xs'
+                    : 'bg-surface-elevated/40 border-border text-text-primary hover:border-border/80'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-lg bg-surface border border-border text-emerald-400">
-                    <Moon size={18} />
-                  </div>
-                  <div>
-                    <span className="block text-xs font-bold text-text-primary">Dark Theme</span>
-                    <span className="block text-[11px] text-text-muted">Deep matte-black & emerald</span>
-                  </div>
+                <div className="flex items-center gap-2.5 text-xs font-semibold">
+                  <Moon size={16} />
+                  <span>Dark Mode</span>
                 </div>
-                {theme === 'dark' && <Check size={18} className="text-emerald-400" />}
+                {theme === 'dark' && <Check size={14} className="text-emerald-400" />}
               </button>
 
-              {/* Light Theme Button */}
               <button
                 type="button"
                 onClick={() => setTheme('light')}
-                className={`flex items-center justify-between p-4 rounded-xl border text-left transition ${
+                className={`p-3.5 rounded-xl border flex items-center justify-between transition cursor-pointer ${
                   theme === 'light'
-                    ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.12)]'
-                    : 'bg-surface-elevated/40 border-border text-text-secondary hover:text-text-primary'
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 ring-1 ring-emerald-500/30 shadow-xs'
+                    : 'bg-surface-elevated/40 border-border text-text-primary hover:border-border/80'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-lg bg-surface border border-border text-amber-500">
-                    <Sun size={18} />
-                  </div>
-                  <div>
-                    <span className="block text-xs font-bold text-text-primary">Light Theme</span>
-                    <span className="block text-[11px] text-text-muted">Warm neutral & slate</span>
-                  </div>
+                <div className="flex items-center gap-2.5 text-xs font-semibold">
+                  <Sun size={16} />
+                  <span>Light Mode</span>
                 </div>
-                {theme === 'light' && <Check size={18} className="text-emerald-600 dark:text-emerald-400" />}
+                {theme === 'light' && <Check size={14} className="text-emerald-400" />}
               </button>
             </div>
           </div>
 
-          {/* Curated Dashboard Background Gallery (8 Options) */}
-          <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          {/* Wallpaper Gallery & Custom Upload */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
               <div>
-                <h3 className="text-sm font-bold text-text-primary flex items-center gap-2">
-                  <ImageIcon size={16} className="text-emerald-600 dark:text-emerald-400" />
-                  <span>Curated Dashboard Backgrounds</span>
-                </h3>
-                <p className="text-xs text-text-secondary mt-1">
-                  Choose from 8 curated 16:9 cinematic backgrounds designed to harmonize with the matte-black and emerald aesthetic.
+                <h3 className="text-base font-bold text-text-primary mb-0.5">Dashboard Background Wallpaper</h3>
+                <p className="text-xs text-text-secondary">
+                  Choose a personalized high-resolution wallpaper or upload your own image for your home dashboard.
                 </p>
               </div>
-              <span className="text-[11px] text-text-muted font-mono self-start sm:self-auto px-2 py-1 rounded bg-surface-elevated/60 border border-border/50">
-                8 Presets Available
-              </span>
+              {hasCustomBg && (
+                <span className="self-start sm:self-auto text-[11px] px-2.5 py-1 rounded-full bg-surface-elevated border border-border text-text-secondary font-medium">
+                  {dashboardBgId === 'custom' ? 'Custom Wallpaper Active' : 'Custom Wallpaper Stored'}
+                </span>
+              )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Built-in Wallpaper Grid (8 real assets) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 mb-5">
               {builtInBackgrounds.map((bg) => {
-                const isSelected = dashboardBgId === bg.id;
+                const isSelected = !hasCustomBg && dashboardBgId === bg.id;
+                const isFailed = failedImages[bg.id];
+
                 return (
                   <button
                     key={bg.id}
                     type="button"
                     onClick={() => selectBuiltInBg(bg.id)}
-                    aria-pressed={isSelected}
-                    className={`group relative flex flex-col rounded-xl overflow-hidden border text-left transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+                    className={`relative rounded-xl overflow-hidden border transition-all duration-200 group text-left aspect-video cursor-pointer touch-manipulation focus:outline-none ${
                       isSelected
-                        ? 'border-emerald-400 ring-2 ring-emerald-400/40 shadow-lg bg-emerald-500/5'
-                        : 'border-border/60 hover:border-emerald-500/40 hover:shadow-md bg-surface/80'
+                        ? 'border-emerald-400 ring-2 ring-emerald-400/50 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
+                        : 'border-border/70 hover:border-border/90 hover:shadow-md'
                     }`}
+                    title={bg.name}
                   >
-                    <div className="h-32 w-full relative overflow-hidden bg-surface-elevated">
+                    {/* Active Selected Badge */}
+                    {isSelected && (
+                      <div className="absolute top-2 right-2 bg-emerald-500 text-slate-950 p-1 rounded-full shadow-md z-20 flex items-center justify-center">
+                        <Check size={12} strokeWidth={3} />
+                      </div>
+                    )}
+
+                    {/* Category Tag */}
+                    {bg.tag && (
+                      <span className="absolute top-2 left-2 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-black/65 text-white/95 backdrop-blur-sm z-20 border border-white/10 shadow-xs">
+                        {bg.tag}
+                      </span>
+                    )}
+
+                    {/* Image with Graceful Error Fallback */}
+                    {isFailed ? (
+                      <div className="absolute inset-0 bg-gradient-to-br from-surface-elevated via-surface to-background flex flex-col items-center justify-center p-3 text-center">
+                        <ImageOff size={22} className="text-text-secondary/60 mb-1" />
+                        <span className="text-[11px] font-medium text-text-secondary">{bg.name}</span>
+                      </div>
+                    ) : (
                       <img
-                        src={bg.path}
+                        src={bg.path || bg.url}
                         alt={bg.name}
                         loading="lazy"
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        onError={() => handleImageError(bg.id)}
+                        className="absolute inset-0 w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-105"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
+                    )}
 
-                      {/* Tag Badge */}
-                      <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-black/60 backdrop-blur-sm text-text-primary border border-white/10">
-                        {bg.tag}
-                      </div>
-
-                      {/* Selected Checkmark */}
-                      {isSelected && (
-                        <div className="absolute top-2 right-2 p-1 rounded-full bg-emerald-500 text-white shadow-md animate-scale-in">
-                          <Check size={13} strokeWidth={2.5} />
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-3 bg-surface/90 flex flex-col flex-1 justify-between">
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-text-primary truncate">
-                            {bg.name}
+                    {/* Gradient Text Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-3 flex flex-col justify-end z-10 pointer-events-none">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-white truncate drop-shadow-sm">{bg.name}</span>
+                        {isSelected && (
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-300 px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/30 shrink-0">
+                            Active
                           </span>
-                          {isSelected && (
-                            <span className="text-[10px] font-bold text-emerald-400 tracking-wider uppercase">
-                              Active
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-text-muted mt-1 line-clamp-2 leading-relaxed">
-                          {bg.description}
-                        </p>
+                        )}
                       </div>
+                      <span className="text-[10px] text-white/75 line-clamp-1 leading-tight drop-shadow-sm mt-0.5">
+                        {bg.description}
+                      </span>
                     </div>
                   </button>
                 );
               })}
             </div>
-          </div>
 
-          {/* Custom Background Upload & Management Section */}
-          <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60 space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-bold text-text-primary flex items-center gap-2">
-                  <Upload size={16} className="text-emerald-600 dark:text-emerald-400" />
-                  <span>Custom Background Upload</span>
-                </h3>
-                <p className="text-xs text-text-secondary mt-1">
-                  Upload your own high-resolution image to personalize your dashboard background.
-                </p>
+            {/* Custom Background Upload Area */}
+            <div className="pt-4 border-t border-border/50 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                  Custom Wallpaper
+                </h4>
+                <span className="text-[11px] text-text-secondary">
+                  JPG, PNG, WebP • Max 8 MB
+                </span>
               </div>
-            </div>
 
-            {/* Saved Custom Background Tile (if one exists for signed-in user) */}
-            {isLoggedIn && hasCustomBg && customBgMeta && (
-              <div className="p-4 rounded-xl bg-surface-elevated/50 border border-border/80 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-20 h-14 rounded-lg overflow-hidden border border-border flex-shrink-0 relative bg-surface">
-                    <img
-                      src={dashboardBg}
-                      alt="Current Custom Background"
-                      className="w-full h-full object-cover"
-                    />
-                    {dashboardBgId === 'custom' && (
-                      <div className="absolute top-1 right-1 p-0.5 rounded-full bg-emerald-500 text-white">
-                        <Check size={10} />
-                      </div>
-                    )}
+              {!isLoggedIn ? (
+                /* Signed-Out / Guest Locked Upload State */
+                <div
+                  onClick={() => (openLogin ? openLogin() : navigate('/login'))}
+                  className="p-5 rounded-xl border border-dashed border-border/80 bg-surface/40 hover:bg-surface/60 transition cursor-pointer text-center group"
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Sign in to upload a custom background"
+                >
+                  <div className="w-10 h-10 rounded-full bg-surface-elevated mx-auto flex items-center justify-center text-emerald-400 mb-2 border border-border/60 group-hover:scale-105 transition-transform shadow-xs">
+                    <Lock size={18} />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-text-primary">
-                        {customBgMeta.name || 'Custom Background'}
-                      </span>
-                      {dashboardBgId === 'custom' ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                          Currently Active
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-surface border border-border text-text-muted">
-                          Custom
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[11px] text-text-muted mt-0.5 flex flex-wrap items-center gap-2">
-                      <span>{customBgMeta.width} × {customBgMeta.height} px</span>
-                      <span>•</span>
-                      <span>{formatBytes(customBgMeta.size)}</span>
-                      <span>•</span>
-                      <span>{customBgMeta.type}</span>
-                    </div>
-                  </div>
+                  <span className="text-xs font-semibold text-text-primary block">
+                    Sign in to upload a custom background
+                  </span>
+                  <p className="text-[11px] text-text-secondary mt-0.5 max-w-sm mx-auto">
+                    Custom high-resolution wallpapers are saved to your personal account profile.
+                  </p>
                 </div>
-
-                <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-                  {dashboardBgId !== 'custom' && (
-                    <button
-                      type="button"
-                      onClick={selectExistingCustomBg}
-                      className="px-3.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-semibold transition"
-                    >
-                      Set as Active
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleRemoveCustomBg}
-                    disabled={isRemoving}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 hover:text-rose-300 text-xs font-semibold transition disabled:opacity-50"
+              ) : (
+                /* Authenticated Custom Upload State */
+                <>
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDragging(false);
+                      if (!isLoggedIn) {
+                        setUploadError('Please sign in to upload custom backgrounds.');
+                        if (openLogin) openLogin();
+                        return;
+                      }
+                      if (e.dataTransfer.files?.[0]) handleFileSelected(e.dataTransfer.files[0]);
+                    }}
+                    className={`p-5 rounded-xl border border-dashed text-center transition cursor-pointer ${
+                      isDragging ? 'border-emerald-400 bg-emerald-500/10' : 'border-border/80 hover:border-border bg-surface-elevated/20'
+                    }`}
+                    onClick={() => fileInputRef.current?.click()}
                   >
-                    {isRemoving ? (
-                      <RefreshCw size={13} className="animate-spin" />
-                    ) : (
-                      <Trash2 size={13} />
-                    )}
-                    <span>Remove</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* LIVE PREVIEW & CONFIRMATION FLOW */}
-            {pendingUpload && (
-              <div className="rounded-xl border border-emerald-500/40 bg-surface/90 overflow-hidden shadow-2xl space-y-4 animate-scale-in">
-                <div className="p-4 bg-emerald-500/10 border-b border-emerald-500/20 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Eye size={16} className="text-emerald-400" />
-                    <span className="text-xs font-bold text-text-primary">
-                      Live Dashboard Simulation & Preview
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) handleFileSelected(e.target.files[0]);
+                      }}
+                    />
+                    <Upload size={20} className="mx-auto text-emerald-400 mb-1.5" />
+                    <span className="text-xs font-semibold text-text-primary block">
+                      Click to upload custom background (JPG, PNG, WebP)
+                    </span>
+                    <span className="text-[10px] text-text-secondary mt-0.5 block">
+                      Up to 8 MB. High resolution (1920x1080 or 4K) recommended.
                     </span>
                   </div>
-                  <span className="text-[11px] text-emerald-400 font-semibold">
-                    Review before applying
-                  </span>
-                </div>
 
-                <div className="px-5 pt-1 space-y-4">
-                  {/* Simulated Dashboard Viewport */}
-                  <div className="relative rounded-xl overflow-hidden border border-border/70 h-64 w-full shadow-inner bg-surface">
-                    {/* Background Layer with cover */}
-                    <div
-                      className="absolute inset-0 bg-cover bg-center transition-all duration-300"
-                      style={{
-                        backgroundImage: `url("${pendingUpload.previewUrl}")`,
-                      }}
-                    />
+                  {uploadError && (
+                    <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-2">
+                      <AlertCircle size={15} className="shrink-0" />
+                      <span>{uploadError}</span>
+                    </div>
+                  )}
 
-                    {/* Gradient Fade Overlay matching the dashboard treatment */}
-                    <div
-                      className="absolute inset-0 pointer-events-none"
-                      style={{
-                        background:
-                          theme === 'dark'
-                            ? 'linear-gradient(to bottom, rgba(10, 15, 29, 0.40) 0%, rgba(10, 15, 29, 0.75) 50%, #0d1117 100%)'
-                            : 'linear-gradient(to bottom, rgba(248, 250, 252, 0.35) 0%, rgba(248, 250, 252, 0.75) 50%, #f3f4f1 100%)',
-                      }}
-                    />
+                  {/* Active / Stored Custom Background Management Card */}
+                  {hasCustomBg && !pendingUpload && (
+                    <div className="p-3.5 rounded-xl bg-surface-elevated/40 border border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-14 h-9 rounded-lg overflow-hidden border border-border shrink-0 bg-black">
+                          <img
+                            src={dashboardBgId === 'custom' ? dashboardBg : '/backgrounds/bg-lake-morning.jpg'}
+                            alt="Custom Background"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-text-primary truncate">
+                              {customBgMeta?.fileName || 'Custom Wallpaper'}
+                            </span>
+                            {dashboardBgId === 'custom' && (
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-300 px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/30">
+                                Active
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-text-secondary mt-0.5">
+                            {customBgMeta?.sizeBytes ? formatBytes(customBgMeta.sizeBytes) : ''}
+                            {customBgMeta?.width && customBgMeta?.height ? ` • ${customBgMeta.width}x${customBgMeta.height}` : ''}
+                          </p>
+                        </div>
+                      </div>
 
-                    {/* Simulated Dashboard Content for Legibility & Contrast Verification */}
-                    <div className="relative z-10 p-5 h-full flex flex-col justify-between pointer-events-none select-none">
-                      {/* Top Header simulation */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 backdrop-blur-md">
-                            PREVIEW MODE
+                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
+                        {dashboardBgId !== 'custom' && (
+                          <button
+                            type="button"
+                            onClick={selectExistingCustomBg}
+                            className="px-3 py-1.5 rounded-lg bg-surface-elevated hover:bg-surface-elevated/80 border border-border text-xs font-semibold text-text-primary transition cursor-pointer"
+                          >
+                            Apply Custom
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={removeCustomBg}
+                          className="p-1.5 rounded-lg hover:bg-red-500/10 text-text-secondary hover:text-red-400 transition cursor-pointer"
+                          title="Delete Custom Background"
+                          aria-label="Delete Custom Background"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pending Upload Preview Card */}
+                  {pendingUpload && (
+                    <div className="p-3.5 rounded-xl bg-surface-elevated border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img
+                          src={pendingUpload.previewUrl}
+                          alt="Preview"
+                          className="w-14 h-9 object-cover rounded-lg border border-border shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-text-primary truncate block">
+                            {pendingUpload.meta.name}
+                          </span>
+                          <span className="text-[10px] text-text-secondary">
+                            {formatBytes(pendingUpload.meta.size)} • {pendingUpload.meta.width}x{pendingUpload.meta.height}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="px-2 py-0.5 rounded-md bg-surface/70 backdrop-blur-md border border-border/60 text-[10px] font-mono text-text-primary">
-                            🔥 3 Day Streak
-                          </div>
-                        </div>
                       </div>
-
-                      {/* Hero Greeting simulation */}
-                      <div className="max-w-md">
-                        <h4 className="text-base font-bold text-text-primary drop-shadow-sm">
-                          Good evening, Aman
-                        </h4>
-                        <p className="text-xs text-text-secondary mt-0.5 line-clamp-1">
-                          "Success is neither magical nor mysterious. It is the natural consequence of applying basic fundamentals consistently."
-                        </p>
+                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            URL.revokeObjectURL(pendingUpload.previewUrl);
+                            setPendingUpload(null);
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:text-text-primary cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isApplying}
+                          onClick={handleApplyPendingUpload}
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-black font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          {isApplying ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
+                          <span>{isApplying ? 'Applying...' : 'Apply Wallpaper'}</span>
+                        </button>
                       </div>
-
-                      {/* Mock Card */}
-                      <div className="flex items-center gap-3">
-                        <div className="p-3 rounded-xl bg-surface/80 backdrop-blur-md border border-border/80 shadow-md flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                            <Sparkles size={16} />
-                          </div>
-                          <div>
-                            <span className="block text-xs font-bold text-text-primary">
-                              Behavioral Coach
-                            </span>
-                            <span className="block text-[10px] text-text-muted">
-                              AI Voice & STAR Practice
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Metadata & Technical Specs */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                    <div className="p-2.5 rounded-lg bg-surface-elevated/40 border border-border/50">
-                      <span className="block text-[10px] text-text-muted">Dimensions</span>
-                      <span className="font-semibold text-text-primary">
-                        {pendingUpload.meta.width} × {pendingUpload.meta.height} px
-                      </span>
-                    </div>
-                    <div className="p-2.5 rounded-lg bg-surface-elevated/40 border border-border/50">
-                      <span className="block text-[10px] text-text-muted">File Size</span>
-                      <span className="font-semibold text-text-primary">
-                        {formatBytes(pendingUpload.meta.size)}
-                      </span>
-                    </div>
-                    <div className="p-2.5 rounded-lg bg-surface-elevated/40 border border-border/50">
-                      <span className="block text-[10px] text-text-muted">Aspect Ratio</span>
-                      <span className="font-semibold text-text-primary">
-                        {pendingUpload.meta.aspectRatio.toFixed(2)}:1 {Math.abs(pendingUpload.meta.aspectRatio - 1.77) < 0.1 ? '(16:9 Widescreen)' : ''}
-                      </span>
-                    </div>
-                    <div className="p-2.5 rounded-lg bg-surface-elevated/40 border border-border/50">
-                      <span className="block text-[10px] text-text-muted">MIME Type</span>
-                      <span className="font-semibold text-text-primary">
-                        {pendingUpload.meta.type}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Warning banner if image has non-fatal aspect ratio / resolution flags */}
-                  {pendingUpload.warning && (
-                    <div className="flex items-start gap-2.5 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs">
-                      <AlertTriangle size={15} className="flex-shrink-0 mt-0.5" />
-                      <span>{pendingUpload.warning}</span>
                     </div>
                   )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
-                  {/* Apply / Cancel Action Buttons */}
-                  <div className="flex items-center justify-end gap-3 pt-2 pb-5 border-t border-border/40">
-                    <button
-                      type="button"
-                      onClick={handleCancelPendingUpload}
-                      disabled={isApplying}
-                      className="px-4 py-2 rounded-xl border border-border text-text-secondary hover:text-text-primary hover:bg-surface-elevated text-xs font-semibold transition"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleApplyPendingUpload}
-                      disabled={isApplying}
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
-                    >
-                      {isApplying ? (
-                        <>
-                          <RefreshCw size={14} className="animate-spin" />
-                          <span>Saving to Browser...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Check size={14} />
-                          <span>Apply Background</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
+      {/* ============================================================== */}
+      {/* TAB 3: ACCOUNT & PERSONALIZATION — What PrepAI Stores & Uses   */}
+      {/* ============================================================== */}
+      {activeTab === 'account' && (
+        <div className="space-y-6">
+          {!isLoaded ? (
+            <div className="p-8 rounded-2xl bg-surface/70 border border-border/60 animate-pulse text-center">
+              <div className="h-5 bg-surface-elevated rounded w-1/3 mx-auto mb-3" />
+              <div className="h-4 bg-surface-elevated rounded w-1/2 mx-auto" />
+            </div>
+          ) : !isLoggedIn ? (
+            /* Guest Account State */
+            <div className="p-8 rounded-2xl bg-surface/70 border border-border/60 text-center space-y-4">
+              <div className="w-14 h-14 rounded-full bg-surface-elevated mx-auto flex items-center justify-center text-emerald-400 shadow-sm">
+                <Lock size={24} />
               </div>
-            )}
-
-            {/* UPLOAD DROPZONE */}
-            {(!pendingUpload || !isLoggedIn) && (
-              <div className="relative rounded-xl overflow-hidden">
-                {/* Underlying Dropzone: Fully visible in current position and size */}
-                <div
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  onClick={() => {
-                    if (!isLoggedIn) return;
-                    fileInputRef.current?.click();
-                  }}
-                  className={`relative flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed transition-all ${
-                    isLoggedIn
-                      ? isDragging
-                        ? 'border-emerald-400 bg-emerald-500/10 scale-[1.005] cursor-pointer'
-                        : 'border-border/80 hover:border-emerald-500/50 hover:bg-surface-elevated/30 bg-surface/40 cursor-pointer'
-                      : 'border-border/60 bg-surface/30 cursor-default'
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    disabled={!isLoggedIn}
-                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-                    className="hidden"
-                    onChange={(e) => {
-                      if (!isLoggedIn) return;
-                      const file = e.target.files?.[0];
-                      if (file) handleFileSelected(file);
-                    }}
-                  />
-
-                  <div className="p-3.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 mb-3">
-                    {isProcessingFile ? (
-                      <RefreshCw size={22} className="animate-spin" />
-                    ) : (
-                      <Upload size={22} />
-                    )}
+              <div className="max-w-md mx-auto">
+                <h3 className="text-lg font-bold text-text-primary">Account & Personalization Requires Sign In</h3>
+                <p className="text-xs text-text-secondary mt-1.5 leading-relaxed">
+                  Sign in to inspect your persistent memory profile with Pepe, review verified learning progress, and manage tailored preparation goals.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => (openLogin ? openLogin() : navigate('/login'))}
+                className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-black font-semibold text-xs inline-flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+              >
+                <LogIn size={15} />
+                <span>Sign In / Create Account</span>
+              </button>
+            </div>
+          ) : (
+            /* Authenticated Account & Personalization View */
+            <div className="space-y-6">
+              {/* SECTION A: WHAT PEPE KNOWS ABOUT YOU */}
+              <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Brain size={18} className="text-emerald-400" />
+                      <h3 className="text-base font-bold text-text-primary">What Pepe Knows About You</h3>
+                    </div>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      Personalized memory facts Pepe uses during mock interviews and coach sessions. Edit or remove items to adjust subsequent AI behavior.
+                    </p>
                   </div>
 
-                  <div className="text-center space-y-1">
-                    <span className="block text-xs font-bold text-text-primary">
-                      {isProcessingFile
-                        ? 'Decoding & verifying image...'
-                        : 'Drop your background image here, or browse files'}
-                    </span>
-                    <span className="block text-[11px] text-text-muted">
-                      Supports JPEG, PNG, and WebP up to 5 MB
-                    </span>
-                    <span className="block text-[10px] text-emerald-400/80 font-mono pt-1">
-                      Recommended: 2560 × 1440 or 1920 × 1080 (16:9 Widescreen)
-                    </span>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddMemoryModal(true)}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs font-semibold inline-flex items-center gap-1.5 transition self-start sm:self-auto cursor-pointer"
+                  >
+                    <Plus size={14} />
+                    <span>Add Confirmed Fact</span>
+                  </button>
                 </div>
 
-                {/* Subtle dark translucent locked overlay for signed-out guests */}
-                {!isLoggedIn && (
-                  <div className="absolute inset-0 z-10 rounded-xl bg-background/80 dark:bg-black/75 backdrop-blur-[2px] border border-border/40 dark:border-white/5 flex flex-col items-center justify-center p-6 text-center select-none animate-fade-in">
-                    <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-2.5 shadow-[0_0_16px_rgba(16,185,129,0.15)]">
-                      <Lock size={20} className="stroke-[2.2]" />
-                    </div>
-                    <h4 className="text-sm font-bold text-text-primary tracking-tight mb-1">
-                      Sign in to unlock custom backgrounds
-                    </h4>
-                    <p className="text-xs text-text-secondary max-w-xs mb-3.5 leading-relaxed">
-                      Personalize your dashboard with your own image.
-                    </p>
+                {/* Category Filter Pills */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-4">
+                  {MEMORY_CATEGORIES.map((cat) => (
                     <button
+                      key={cat.id}
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (openLogin) openLogin();
-                        else navigate('/login');
-                      }}
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30 transition transform hover:-translate-y-0.5 cursor-pointer pointer-events-auto"
+                      onClick={() => setSelectedMemoryCategory(cat.id)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-semibold transition shrink-0 cursor-pointer ${
+                        selectedMemoryCategory === cat.id
+                          ? 'bg-emerald-500 text-black shadow-xs'
+                          : 'bg-surface-elevated/60 text-text-secondary hover:text-text-primary'
+                      }`}
                     >
-                      <LogIn size={14} />
-                      <span>Sign In</span>
+                      {cat.label}
                     </button>
+                  ))}
+                </div>
+
+                {/* Add Memory Modal / Form */}
+                {showAddMemoryModal && (
+                  <form onSubmit={handleCreateMemory} className="mb-4 p-4 rounded-xl bg-surface-elevated/70 border border-emerald-500/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-text-primary">Add Confirmed Personal Fact / Preference</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddMemoryModal(false)}
+                        className="text-text-secondary hover:text-text-primary"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-text-secondary mb-1">Category</label>
+                        <select
+                          value={newMemoryCategory}
+                          onChange={(e) => setNewMemoryCategory(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-lg bg-surface border border-border text-xs text-text-primary"
+                        >
+                          <option value="technical_strength">Technical Strength</option>
+                          <option value="technical_weakness">Growth Area</option>
+                          <option value="experience">Experience Fact</option>
+                          <option value="preference">Preference</option>
+                          <option value="goal">Career Goal</option>
+                        </select>
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-[11px] font-semibold text-text-secondary mb-1">Memory Content</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. 4 years of hands-on experience building production Kubernetes pipelines"
+                          value={newMemoryContent}
+                          onChange={(e) => setNewMemoryContent(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-lg bg-surface border border-border text-xs text-text-primary"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddMemoryModal(false)}
+                        className="px-3 py-1 rounded-lg text-xs text-text-secondary"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSavingMemory}
+                        className="px-4 py-1.5 rounded-lg bg-emerald-500 text-black font-semibold text-xs"
+                      >
+                        {isSavingMemory ? 'Saving...' : 'Save to Memory'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Memories List */}
+                {isLoadingMemories ? (
+                  <div className="p-8 text-center text-xs text-text-secondary animate-pulse">
+                    Loading personalization memories...
+                  </div>
+                ) : filteredMemories.length === 0 ? (
+                  <div className="p-6 rounded-xl border border-dashed border-border/80 text-center">
+                    <p className="text-xs text-text-secondary">
+                      No memories found in this category. As you practice mock interviews or add personal facts, Pepe will record verified context here.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {filteredMemories.map((mem) => {
+                      const isManual = mem.source === 'manual';
+                      const isEditing = editingMemoryId === mem._id;
+
+                      return (
+                        <div
+                          key={mem._id}
+                          className="p-3.5 rounded-xl bg-surface-elevated/40 border border-border/70 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <span className="px-2 py-0.5 rounded-full bg-surface border border-border text-[10px] font-semibold text-text-secondary uppercase tracking-wider">
+                                {mem.category.replace('_', ' ')}
+                              </span>
+
+                              {isManual ? (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-bold">
+                                  User Fact
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 text-[10px] font-bold">
+                                  AI Inferred ({mem.source})
+                                </span>
+                              )}
+
+                              <span className="text-[10px] text-text-secondary">
+                                Confirmed: {new Date(mem.lastConfirmedAt).toLocaleDateString()}
+                              </span>
+                            </div>
+
+                            {isEditing ? (
+                              <div className="mt-2 flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={editMemoryContent}
+                                  onChange={(e) => setEditMemoryContent(e.target.value)}
+                                  className="flex-1 px-3 py-1.5 rounded-lg bg-surface border border-emerald-500 text-xs text-text-primary"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={isSavingMemory}
+                                  onClick={() => handleUpdateMemory(mem._id)}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black text-xs font-semibold"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingMemoryId(null)}
+                                  className="px-2 py-1.5 text-xs text-text-secondary"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-text-primary leading-relaxed">{mem.content}</p>
+                            )}
+                          </div>
+
+                          {!isEditing && (
+                            <div className="flex items-center gap-1 shrink-0 self-end sm:self-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMemoryId(mem._id);
+                                  setEditMemoryContent(mem.content);
+                                }}
+                                className="p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface transition"
+                                title="Edit memory"
+                              >
+                                <Edit3 size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteMemory(mem._id)}
+                                className="p-1.5 rounded-lg text-text-secondary hover:text-red-400 hover:bg-surface transition"
+                                title="Delete memory"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
-            )}
 
-            {/* Error Banner */}
-            {uploadError && (
-              <div className="flex items-start justify-between gap-2.5 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs animate-shake">
-                <div className="flex items-start gap-2">
-                  <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
-                  <span>{uploadError}</span>
+              {/* SECTION B: LEARNING & PROGRESS */}
+              <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <TrendingUp size={18} className="text-emerald-400" />
+                      <h3 className="text-base font-bold text-text-primary">Learning & Progress</h3>
+                    </div>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      Empirical activity records from your verified coding problem submissions and interview evaluations.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate('/progress')}
+                    className="px-3 py-1.5 rounded-xl bg-surface-elevated/70 hover:bg-surface-elevated border border-border text-xs font-medium text-text-primary inline-flex items-center gap-1.5 transition self-start sm:self-auto cursor-pointer"
+                  >
+                    <span>Full Analytics View</span>
+                    <ExternalLink size={12} />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setUploadError(null)}
-                  className="p-0.5 hover:text-white flex-shrink-0"
-                >
-                  <X size={14} />
-                </button>
+
+                <div className="mb-4 p-2.5 rounded-xl bg-surface-elevated/40 border border-border/50 text-[11px] text-text-secondary flex items-center gap-2">
+                  <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
+                  <span>These records reflect verified compiler submissions and scored interview sessions, distinct from AI inferences.</span>
+                </div>
+
+                {isLoadingProgress ? (
+                  <div className="p-6 text-center text-xs text-text-secondary animate-pulse">
+                    Loading activity metrics...
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-4 rounded-xl bg-surface-elevated/50 border border-border">
+                      <span className="text-[10px] font-semibold text-text-secondary uppercase">Problems Solved</span>
+                      <h4 className="text-xl font-bold text-text-primary mt-1">
+                        {dsaStatsData?.totalSolved ?? progressData?.dsaStats?.uniqueSolved ?? 0}
+                      </h4>
+                      <span className="text-[10px] text-emerald-400 mt-0.5 block">
+                        Accuracy: {dsaStatsData?.accuracy ?? progressData?.dsaStats?.accuracyRate ?? 0}%
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-surface-elevated/50 border border-border">
+                      <span className="text-[10px] font-semibold text-text-secondary uppercase">Interviews Done</span>
+                      <h4 className="text-xl font-bold text-text-primary mt-1">
+                        {progressData?.chatSessions?.length ?? 0}
+                      </h4>
+                      <span className="text-[10px] text-text-secondary mt-0.5 block">Completed sessions</span>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-surface-elevated/50 border border-border">
+                      <span className="text-[10px] font-semibold text-text-secondary uppercase">Current Streak</span>
+                      <h4 className="text-xl font-bold text-text-primary mt-1">
+                        {progressData?.currentStreak ?? 0} days
+                      </h4>
+                      <span className="text-[10px] text-emerald-400 mt-0.5 block">Consecutive activity</span>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-surface-elevated/50 border border-border">
+                      <span className="text-[10px] font-semibold text-text-secondary uppercase">Latest ATS Match</span>
+                      <h4 className="text-xl font-bold text-text-primary mt-1">
+                        {progressData?.resumeReviews?.[0]?.atsAssessment?.estimatedScore ?? 'N/A'}{progressData?.resumeReviews?.[0] ? '/100' : ''}
+                      </h4>
+                      <span className="text-[10px] text-text-secondary mt-0.5 block">Preferred resume</span>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
-      )}
 
-      {/* TAB 3: PREFERENCES */}
-      {activeTab === 'preferences' && (
-        <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60 space-y-6">
-          <h3 className="text-sm font-bold text-text-primary flex items-center gap-2 border-b border-border/40 pb-3">
-            <Sliders size={16} className="text-emerald-400" />
-            <span>Workspace & AI Preferences</span>
-          </h3>
+              {/* SECTION C: PREPARATION GOALS */}
+              <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Target size={18} className="text-emerald-400" />
+                      <h3 className="text-base font-bold text-text-primary">Preparation Goals & Schedule</h3>
+                    </div>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      Your active study roadmap. Updating your focus topics updates your daily DSA problem recommendation engine.
+                    </p>
+                  </div>
+                </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div>
-              <label className="block text-xs font-semibold text-text-secondary mb-1.5">
-                Default DSA Programming Language
-              </label>
-              <select
-                value={defaultLanguage}
-                onChange={(e) => {
-                  setDefaultLanguage(e.target.value);
-                  localStorage.setItem('prepai_default_language', e.target.value);
-                }}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-elevated/60 border border-border text-text-primary text-xs focus:outline-none focus:border-emerald-500/60"
-              >
-                <option value="javascript">JavaScript</option>
-                <option value="python">Python</option>
-                <option value="java">Java</option>
-                <option value="cpp">C++</option>
-              </select>
+                {goalsSuccessMessage && (
+                  <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs flex items-center gap-2">
+                    <CheckCircle2 size={15} />
+                    <span>{goalsSuccessMessage}</span>
+                  </div>
+                )}
+
+                {isLoadingGoals ? (
+                  <div className="p-6 text-center text-xs text-text-secondary animate-pulse">
+                    Loading your study plan...
+                  </div>
+                ) : (
+                  <form onSubmit={handleSaveGoals} className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-text-secondary mb-1">
+                          Target Companies
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Google, Meta, Stripe"
+                          value={goalsProfile.targetCompanies}
+                          onChange={(e) => setGoalsProfile({ ...goalsProfile, targetCompanies: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-surface-elevated/70 border border-border text-xs text-text-primary"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-text-secondary mb-1">
+                          Daily Time Commitment
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 1 hour / day"
+                          value={goalsProfile.dailyTime}
+                          onChange={(e) => setGoalsProfile({ ...goalsProfile, dailyTime: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-surface-elevated/70 border border-border text-xs text-text-primary"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-text-secondary mb-1">
+                          Focus Areas / Weak Topics
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Dynamic Programming, Graphs, System Design"
+                          value={goalsProfile.weakTopics}
+                          onChange={(e) => setGoalsProfile({ ...goalsProfile, weakTopics: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-surface-elevated/70 border border-border text-xs text-text-primary"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-text-secondary mb-1">
+                          Daily Practice Target
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 2 LeetCode Mediums + 1 Behavioral Story"
+                          value={goalsProfile.dailyTarget}
+                          onChange={(e) => setGoalsProfile({ ...goalsProfile, dailyTarget: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-surface-elevated/70 border border-border text-xs text-text-primary"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <button
+                        type="submit"
+                        disabled={isSavingGoals}
+                        className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-black font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Save size={14} />
+                        <span>{isSavingGoals ? 'Saving Plan...' : 'Save Preparation Goals'}</span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+
+              {/* SECTION D: ACCOUNT ACTIONS */}
+              <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+                <h3 className="text-base font-bold text-text-primary mb-1">Account & Session Management</h3>
+                <p className="text-xs text-text-secondary mb-4">
+                  Manage authentication credentials, identity settings, and active browser sessions.
+                </p>
+
+                <div className="p-4 rounded-xl bg-surface-elevated/50 border border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10px] font-semibold text-text-secondary uppercase tracking-wider block">
+                      Account Status
+                    </span>
+                    <p className="text-sm font-semibold text-text-primary truncate mt-0.5">
+                      {userEmail || 'Authenticated User'}
+                    </p>
+                    <span className="text-[11px] text-text-secondary mt-0.5 block">
+                      Managed via Clerk Authentication
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => openUserProfile && openUserProfile()}
+                      className="px-3.5 py-2 rounded-xl bg-surface-elevated hover:bg-surface-elevated/80 border border-border text-xs font-semibold text-text-primary transition cursor-pointer"
+                    >
+                      Manage Security & DP
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={logout}
+                      className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 text-red-400 font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <LogOut size={14} />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-text-secondary mb-1.5">
-                Preferred Speech Synthesis Voice
-              </label>
-              <input
-                type="text"
-                value="Google UK English (Default)"
-                readOnly
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-elevated/40 border border-border text-text-secondary text-xs cursor-not-allowed"
-              />
-              <span className="text-[10px] text-text-muted mt-1 block">
-                Microsoft voices are excluded; Google UK English is prioritized.
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 4: ACCOUNT */}
-      {activeTab === 'account' && (
-        <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60 space-y-6">
-          <h3 className="text-sm font-bold text-text-primary flex items-center gap-2 border-b border-border/40 pb-3">
-            <ShieldCheck size={16} className="text-emerald-400" />
-            <span>Account Status & Security</span>
-          </h3>
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl bg-surface-elevated/40 border border-border/60 gap-4">
-            <div>
-              <span className="text-xs font-bold text-text-primary block">Subscription Tier</span>
-              <span className="text-xs text-text-secondary">PrepAI Developer Community Access</span>
-            </div>
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-              Active Plan
-            </span>
-          </div>
-
-          <div className="pt-4 border-t border-border/40 flex justify-between items-center">
-            <span className="text-xs text-text-secondary">Session management provided by Clerk.</span>
-            <button
-              type="button"
-              onClick={logout}
-              className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-semibold transition"
-            >
-              Sign Out
-            </button>
-          </div>
+          )}
         </div>
       )}
     </div>

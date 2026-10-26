@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { useAuth as useClerkAuth } from '@clerk/react';
 import {
   getCustomBackground,
   saveCustomBackground,
@@ -7,60 +8,68 @@ import {
 
 export const BUILT_IN_BACKGROUNDS = [
   {
-    id: 'alpine-sunset',
-    name: 'Alpine Sunset',
-    path: '/backgrounds/bg-mountain-night.jpg',
-    description: 'Cinematic mountain peaks, warm sunset and lake reflections',
+    id: 'morning-lake',
+    name: 'Morning Lake',
+    path: '/backgrounds/bg-lake-morning.jpg',
+    url: '/backgrounds/bg-lake-morning.jpg',
+    description: 'Serene alpine lake with tranquil mountain reflections at sunrise',
     tag: 'Default',
-  },
-  {
-    id: 'emerald-forest',
-    name: 'Emerald Forest',
-    path: '/backgrounds/bg-misty-forest.jpg',
-    description: 'Dark evergreen forest, mist and subtle green valley tones',
-    tag: 'Atmospheric',
-  },
-  {
-    id: 'midnight-peaks',
-    name: 'Midnight Peaks',
-    path: '/backgrounds/bg-twilight-peaks.jpg',
-    description: 'Starlit alpine silhouettes under a deep indigo night sky',
-    tag: 'Celestial',
-  },
-  {
-    id: 'matte-obsidian',
-    name: 'Matte Obsidian',
-    path: '/backgrounds/bg-matte-obsidian.jpg',
-    description: 'Premium brushed-titanium with carbon fiber weave and emerald rim lighting',
-    tag: 'Minimal',
   },
   {
     id: 'aurora-night',
     name: 'Aurora Night',
     path: '/backgrounds/bg-aurora-night.jpg',
-    description: 'Dark mountain peaks under glowing green and teal northern lights',
+    url: '/backgrounds/bg-aurora-night.jpg',
+    description: 'Vibrant emerald northern lights dancing over dramatic mountain ridges',
     tag: 'Vibrant',
   },
   {
-    id: 'twilight-lake',
-    name: 'Twilight Lake',
-    path: '/backgrounds/bg-sunset-dusk.jpg',
-    description: 'Cinematic blue-grey twilight glow across quiet mountain waters',
-    tag: 'Calm',
+    id: 'snow-peak',
+    name: 'Snow Peak',
+    path: '/backgrounds/bg-snow-peak.jpg',
+    url: '/backgrounds/bg-snow-peak.jpg',
+    description: 'Majestic snow-capped summits bathed in crisp alpine daylight',
+    tag: 'Alpine',
+  },
+  {
+    id: 'misty-forest',
+    name: 'Misty Forest',
+    path: '/backgrounds/bg-misty-forest.png',
+    url: '/backgrounds/bg-misty-forest.png',
+    description: 'Atmospheric evergreen pines draped in soft morning fog and mist',
+    tag: 'Nature',
+  },
+  {
+    id: 'moon-shine',
+    name: 'Moonlight Serenade',
+    path: '/backgrounds/bg-moon-shine.jpg',
+    url: '/backgrounds/bg-moon-shine.jpg',
+    description: 'Silvery celestial full moon illuminating a peaceful mountain vista',
+    tag: 'Celestial',
+  },
+  {
+    id: 'dreamy-horizon',
+    name: 'Dreamy Horizon',
+    path: '/backgrounds/bg-dreamy.jpg',
+    url: '/backgrounds/bg-dreamy.jpg',
+    description: 'Ethereal pastel clouds and glowing twilight sky with soft warm gradients',
+    tag: 'Atmospheric',
+  },
+  {
+    id: 'cosmic-nebula',
+    name: 'Cosmic Nebula',
+    path: '/backgrounds/bg-nebula.jpg',
+    url: '/backgrounds/bg-nebula.jpg',
+    description: 'Deep space interstellar nebula sparkling with distant star clusters',
+    tag: 'Cosmic',
   },
   {
     id: 'dark-abstract',
     name: 'Dark Abstract',
     path: '/backgrounds/bg-dark-abstract.jpg',
-    description: 'Minimal charcoal obsidian geometric planes with soft emerald refractions',
-    tag: 'Modern',
-  },
-  {
-    id: 'golden-horizon',
-    name: 'Golden Horizon',
-    path: '/backgrounds/bg-golden-horizon.jpg',
-    description: 'Rugged dark landscape with a warm golden amber sunset horizon',
-    tag: 'Dramatic',
+    url: '/backgrounds/bg-dark-abstract.jpg',
+    description: 'Sleek minimalist obsidian geometry accented by subtle neon reflections',
+    tag: 'Minimal',
   },
 ];
 
@@ -69,38 +78,37 @@ const DEFAULT_BG = BUILT_IN_BACKGROUNDS[0];
 const ThemeContext = createContext();
 
 export const ThemeProvider = ({ children }) => {
-  // Theme state: dark or light
+  // Clerk authentication state
+  const clerkAuth = useClerkAuth();
+  const authLoaded = clerkAuth?.isLoaded ?? true;
+  const isSignedIn = clerkAuth?.isSignedIn ?? false;
+  const clerkUserId = clerkAuth?.userId ?? null;
+
+  // Active identity scope: 'guest' | clerkUserId
+  // When authentication is still resolving (authLoaded === false), we prevent flashing previous accounts
+  const activeScope = (authLoaded && isSignedIn && clerkUserId) ? clerkUserId : 'guest';
+  const activeScopeRef = useRef(activeScope);
+  activeScopeRef.current = activeScope;
+
+  // Theme state: dark or light (device/browser visual preference)
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('theme');
     if (saved === 'light') return 'light';
     return 'dark'; // Dark is default developer aesthetic
   });
 
-  // Track the active background ID (built-in ID or 'custom')
-  const [dashboardBgId, setDashboardBgId] = useState(() => {
-    return localStorage.getItem('prepai_dashboard_bg_id') || 'alpine-sunset';
-  });
+  // Track the active background ID (built-in ID or 'custom') for active scope
+  const [dashboardBgId, setDashboardBgId] = useState(DEFAULT_BG.id);
 
   // Active background URL string (either a built-in static path or a blob object URL)
-  const [dashboardBg, setDashboardBgState] = useState(() => {
-    const savedId = localStorage.getItem('prepai_dashboard_bg_id');
-    if (savedId && savedId !== 'custom') {
-      const match = BUILT_IN_BACKGROUNDS.find((b) => b.id === savedId);
-      if (match) return match.path;
-    }
-    const legacyPath = localStorage.getItem('dashboardBg');
-    if (legacyPath && !legacyPath.startsWith('blob:')) {
-      return legacyPath;
-    }
-    return DEFAULT_BG.path;
-  });
+  const [dashboardBg, setDashboardBgState] = useState(DEFAULT_BG.path);
 
-  // Custom background metadata & availability
+  // Custom background metadata & availability for active scope
   const [hasCustomBg, setHasCustomBg] = useState(false);
   const [customBgMeta, setCustomBgMeta] = useState(null);
   const [isBgLoading, setIsBgLoading] = useState(true);
 
-  // Keep track of active object URL to prevent memory leaks
+  // Keep track of active object URL to prevent memory leaks and identity leakage
   const activeObjectUrlRef = useRef(null);
 
   // Sync theme class to document root
@@ -114,42 +122,76 @@ export const ThemeProvider = ({ children }) => {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // Load custom background from IndexedDB on initial mount
+  // Account-scoped background loader and identity switch handler
   useEffect(() => {
-    let isCancelled = false;
+    if (!authLoaded) {
+      // Waiting for Clerk to finish determining authentication.
+      // Do not reveal or flash any previous account's wallpaper.
+      setIsBgLoading(true);
+      return;
+    }
 
-    const initBackground = async () => {
+    let isCancelled = false;
+    const scope = activeScope;
+
+    const loadScopeBackground = async () => {
+      setIsBgLoading(true);
+
+      // Clean up previous blob URL to prevent memory leaks and identity leakage
+      if (activeObjectUrlRef.current) {
+        URL.revokeObjectURL(activeObjectUrlRef.current);
+        activeObjectUrlRef.current = null;
+      }
+
+      // 1. Retrieve account-scoped saved ID
+      const accountKey = `prepai_dashboard_bg_id_${scope}`;
+      let savedId = localStorage.getItem(accountKey);
+
+      // Cautious migration: only for guest, migrate legacy shared key if it exists
+      if (!savedId && scope === 'guest') {
+        const legacyId = localStorage.getItem('prepai_dashboard_bg_id');
+        if (legacyId && (legacyId === 'custom' || BUILT_IN_BACKGROUNDS.some((b) => b.id === legacyId))) {
+          localStorage.setItem(accountKey, legacyId);
+          savedId = legacyId;
+        }
+      }
+
+      if (!savedId) {
+        savedId = DEFAULT_BG.id;
+      }
+
+      // 2. Query account-scoped custom background from IndexedDB
       try {
-        const stored = await getCustomBackground();
+        const stored = await getCustomBackground(scope);
         if (isCancelled) return;
 
         if (stored && stored.blob) {
           setHasCustomBg(true);
           setCustomBgMeta(stored.metadata);
 
-          // If the user previously selected the custom background, activate it
-          if (dashboardBgId === 'custom') {
+          if (savedId === 'custom') {
             const url = URL.createObjectURL(stored.blob);
-            if (activeObjectUrlRef.current) {
-              URL.revokeObjectURL(activeObjectUrlRef.current);
-            }
             activeObjectUrlRef.current = url;
+            setDashboardBgId('custom');
             setDashboardBgState(url);
+            setIsBgLoading(false);
+            return;
           }
         } else {
           setHasCustomBg(false);
           setCustomBgMeta(null);
-
-          // If user had custom selected but storage is empty, fallback to default
-          if (dashboardBgId === 'custom') {
-            setDashboardBgId(DEFAULT_BG.id);
-            setDashboardBgState(DEFAULT_BG.path);
-            localStorage.setItem('prepai_dashboard_bg_id', DEFAULT_BG.id);
-            localStorage.setItem('dashboardBg', DEFAULT_BG.path);
-          }
         }
+
+        // If savedId was 'custom' but no custom blob exists for this account, fallback
+        const effectiveId = savedId === 'custom' ? DEFAULT_BG.id : savedId;
+        const match = BUILT_IN_BACKGROUNDS.find((b) => b.id === effectiveId) || DEFAULT_BG;
+
+        setDashboardBgId(match.id);
+        setDashboardBgState(match.path);
       } catch (err) {
-        console.warn('Failed to inspect IndexedDB custom background:', err);
+        console.warn('Failed to load account background:', err);
+        setDashboardBgId(DEFAULT_BG.id);
+        setDashboardBgState(DEFAULT_BG.path);
       } finally {
         if (!isCancelled) {
           setIsBgLoading(false);
@@ -157,7 +199,7 @@ export const ThemeProvider = ({ children }) => {
       }
     };
 
-    initBackground();
+    loadScopeBackground();
 
     return () => {
       isCancelled = true;
@@ -166,10 +208,11 @@ export const ThemeProvider = ({ children }) => {
         activeObjectUrlRef.current = null;
       }
     };
-  }, []);
+  }, [authLoaded, activeScope]);
 
-  // Select a built-in background
+  // Select a built-in background for the active account scope
   const selectBuiltInBg = useCallback((bgIdOrPath) => {
+    const scope = activeScopeRef.current;
     const match = BUILT_IN_BACKGROUNDS.find(
       (b) => b.id === bgIdOrPath || b.path === bgIdOrPath
     ) || DEFAULT_BG;
@@ -182,14 +225,20 @@ export const ThemeProvider = ({ children }) => {
 
     setDashboardBgId(match.id);
     setDashboardBgState(match.path);
-    localStorage.setItem('prepai_dashboard_bg_id', match.id);
-    localStorage.setItem('dashboardBg', match.path);
+
+    localStorage.setItem(`prepai_dashboard_bg_id_${scope}`, match.id);
+    localStorage.setItem(`dashboardBg_${scope}`, match.path);
   }, []);
 
-  // Save and activate a newly uploaded custom background image
+  // Save and activate a newly uploaded custom background image for active account scope
   const applyCustomBg = useCallback(async (blob, metadata = {}) => {
+    const scope = activeScopeRef.current;
+    if (scope === 'guest') {
+      throw new Error('Please sign in to upload a custom background.');
+    }
+
     try {
-      const stored = await saveCustomBackground(blob, metadata);
+      const stored = await saveCustomBackground(blob, metadata, scope);
 
       // Create new blob object URL
       const newUrl = URL.createObjectURL(blob);
@@ -204,9 +253,8 @@ export const ThemeProvider = ({ children }) => {
       setDashboardBgId('custom');
       setDashboardBgState(newUrl);
 
-      localStorage.setItem('prepai_dashboard_bg_id', 'custom');
-      // Do NOT store blob URL or base64 in localStorage
-      localStorage.setItem('dashboardBg', 'custom');
+      localStorage.setItem(`prepai_dashboard_bg_id_${scope}`, 'custom');
+      localStorage.setItem(`dashboardBg_${scope}`, 'custom');
 
       return stored;
     } catch (err) {
@@ -215,10 +263,11 @@ export const ThemeProvider = ({ children }) => {
     }
   }, []);
 
-  // Switch back to an existing custom background if already in IndexedDB
+  // Switch back to an existing custom background if already in IndexedDB for active account scope
   const selectExistingCustomBg = useCallback(async () => {
+    const scope = activeScopeRef.current;
     try {
-      const stored = await getCustomBackground();
+      const stored = await getCustomBackground(scope);
       if (stored && stored.blob) {
         const newUrl = URL.createObjectURL(stored.blob);
 
@@ -231,18 +280,20 @@ export const ThemeProvider = ({ children }) => {
         setDashboardBgState(newUrl);
         setHasCustomBg(true);
         setCustomBgMeta(stored.metadata);
-        localStorage.setItem('prepai_dashboard_bg_id', 'custom');
-        localStorage.setItem('dashboardBg', 'custom');
+
+        localStorage.setItem(`prepai_dashboard_bg_id_${scope}`, 'custom');
+        localStorage.setItem(`dashboardBg_${scope}`, 'custom');
       }
     } catch (err) {
       console.error('Failed to switch to existing custom background:', err);
     }
   }, []);
 
-  // Remove the custom background from IndexedDB and revert to default
+  // Remove the custom background from IndexedDB and revert to default for active account scope
   const removeCustomBg = useCallback(async () => {
+    const scope = activeScopeRef.current;
     try {
-      await deleteCustomBackground();
+      await deleteCustomBackground(scope);
 
       if (activeObjectUrlRef.current) {
         URL.revokeObjectURL(activeObjectUrlRef.current);

@@ -12,6 +12,10 @@ const reviewSchema = new Schema({
         type: String,
         default: null
     },
+    fileName: {
+        type: String,
+        default: ""
+    },
     jobTitle: {
         type: String,
         default: ""

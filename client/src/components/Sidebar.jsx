@@ -21,6 +21,7 @@ const Sidebar = () => {
     logout,
     userName,
     userEmail,
+    userImageUrl,
     isLoaded,
     isLoggedIn,
   } = useAuth();
@@ -108,7 +109,22 @@ const Sidebar = () => {
               className="flex items-center gap-3 overflow-hidden group flex-1 min-w-0"
               title="View settings and profile"
             >
-              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white font-semibold text-xs flex items-center justify-center shrink-0 shadow-sm group-hover:ring-2 group-hover:ring-emerald-400/50 transition">
+              {userImageUrl ? (
+                <img
+                  src={userImageUrl}
+                  alt={userName || 'User'}
+                  className="w-9 h-9 rounded-full object-cover shrink-0 shadow-sm group-hover:ring-2 group-hover:ring-emerald-400/50 transition"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    if (e.currentTarget.nextElementSibling) {
+                      e.currentTarget.nextElementSibling.style.display = 'flex';
+                    }
+                  }}
+                />
+              ) : null}
+              <div
+                className={`w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white font-semibold text-xs flex items-center justify-center shrink-0 shadow-sm group-hover:ring-2 group-hover:ring-emerald-400/50 transition ${userImageUrl ? 'hidden' : 'flex'}`}
+              >
                 {userInitial}
               </div>
               <span className="text-xs font-semibold text-text-primary truncate">

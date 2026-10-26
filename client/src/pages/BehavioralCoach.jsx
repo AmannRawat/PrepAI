@@ -273,6 +273,12 @@ const BehavioralCoach = () => {
   const [isSessionOver, setIsSessionOver] = useState(false);
 
   const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
+  const isNearBottomRef = useRef(true);
+  const prevMessagesLengthRef = useRef(0);
+  const isInitialScrolledRef = useRef(false);
+  const lastHydratedSessionIdRef = useRef(null);
+  const saveBehavioralStateRef = useRef(null);
 
   // Audio / Speech Synthesis state (TTS)
   const [voices, setVoices] = useState([]);
@@ -282,10 +288,16 @@ const BehavioralCoach = () => {
 
   // Setup state
   const [showSetup, setShowSetup] = useState(false);
-  const [targetRole, setTargetRole] = useState('Software Engineer');
-  const [targetCompany, setTargetCompany] = useState('Google');
+  const [targetRole, setTargetRole] = useState(() => {
+    return localStorage.getItem('prepai_target_role') || 'Software Engineer';
+  });
+  const [targetCompany, setTargetCompany] = useState(() => {
+    return localStorage.getItem('prepai_target_company') || 'Google';
+  });
   const [experienceLevel, setExperienceLevel] = useState('mid');
   const [difficulty, setDifficulty] = useState('Medium');
+  const [startingDifficulty, setStartingDifficulty] = useState('Medium');
+  const [adaptiveDifficulty, setAdaptiveDifficulty] = useState('Medium');
   const [yearsOfExperience, setYearsOfExperience] = useState('');
   const [focusAreas, setFocusAreas] = useState('');
   const [useResume, setUseResume] = useState(true);
@@ -567,7 +579,7 @@ const BehavioralCoach = () => {
   const submitVoiceAnswer = () => {
     stopVoiceRecording();
     setIsVoiceMode(false);
-    if (input.trim()) {
+    if ((input ?? '').trim()) {
       handleSubmit();
     }
   };
@@ -615,120 +627,21 @@ const BehavioralCoach = () => {
   // ---------------------------------------------------------
   const behavioralStorageKey = userId ? `prepai:${userId}:behavioral` : null;
 
-  useEffect(() => {
-    if (!behavioralStorageKey) return;
-    try {
-      const savedState = localStorage.getItem(behavioralStorageKey);
-      if (!savedState) return;
-
-      const parsedState = JSON.parse(savedState);
-      if (parsedState.sessionId) setSessionId(parsedState.sessionId);
-      if (Array.isArray(parsedState.messages) && parsedState.messages.length > 0) {
-        setMessages(parsedState.messages);
-      }
-      if (parsedState.targetRole !== undefined) setTargetRole(parsedState.targetRole);
-      if (parsedState.targetCompany !== undefined) setTargetCompany(parsedState.targetCompany);
-      if (parsedState.interviewType !== undefined) setInterviewType(parsedState.interviewType);
-      if (parsedState.difficulty !== undefined) setDifficulty(parsedState.difficulty);
-      if (parsedState.experienceLevel !== undefined) setExperienceLevel(parsedState.experienceLevel);
-      if (parsedState.yearsOfExperience !== undefined) setYearsOfExperience(parsedState.yearsOfExperience);
-      if (parsedState.focusAreas !== undefined) setFocusAreas(parsedState.focusAreas);
-      if (Array.isArray(parsedState.stagePlan)) setStagePlan(parsedState.stagePlan);
-      if (typeof parsedState.currentStageIndex === 'number') setCurrentStageIndex(parsedState.currentStageIndex);
-      if (parsedState.useResume !== undefined) setUseResume(parsedState.useResume);
-      if (parsedState.isSessionOver !== undefined) setIsSessionOver(parsedState.isSessionOver);
-      if (parsedState.activityRecorded !== undefined) setActivityRecorded(parsedState.activityRecorded);
-      if (parsedState.showSetup !== undefined) setShowSetup(parsedState.showSetup);
-
-      console.log("Behavioral Coach state restored from localStorage.");
-    } catch (error) {
-      console.error("Failed to restore Behavioral Coach state:", error);
-    }
-  }, [behavioralStorageKey]);
-
-  // ---------------------------------------------------------
-  // Authoritative Backend Session Hydration on Mount/Reload
-  // ---------------------------------------------------------
-  useEffect(() => {
-    let isMounted = true;
-    const hydrateAuthoritativeSession = async () => {
-      if (!sessionId || !isLoggedIn) return;
-      try {
-        const token = await getToken();
-        if (!token || !isMounted) return;
-
-        const res = await axios.get(
-          `${import.meta.env.VITE_API_URL}/api/interview/${sessionId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          }
-        );
-
-        if (!isMounted || !res.data) return;
-
-        const data = res.data;
-        if (Array.isArray(data.stagePlan) && data.stagePlan.length > 0) {
-          setStagePlan(data.stagePlan);
-        }
-        if (typeof data.currentStageIndex === 'number') {
-          setCurrentStageIndex(data.currentStageIndex);
-        }
-        if (data.targetRole) setTargetRole(data.targetRole);
-        if (data.targetCompany) setTargetCompany(data.targetCompany);
-        if (data.interviewType) setInterviewType(data.interviewType);
-        if (data.difficulty) setDifficulty(data.difficulty);
-        if (data.experienceLevel) setExperienceLevel(data.experienceLevel);
-        if (data.yearsOfExperience !== undefined && data.yearsOfExperience !== null) {
-          setYearsOfExperience(String(data.yearsOfExperience));
-        }
-        if (data.focusAreas) setFocusAreas(data.focusAreas);
-        if (data.status === 'completed') setIsSessionOver(true);
-        if (Array.isArray(data.messages) && data.messages.length > 0) {
-          setMessages(data.messages);
-        }
-
-        saveBehavioralState({
-          sessionId: data.sessionId,
-          stagePlan: data.stagePlan,
-          currentStageIndex: data.currentStageIndex,
-          targetRole: data.targetRole,
-          targetCompany: data.targetCompany,
-          interviewType: data.interviewType,
-          difficulty: data.difficulty,
-          experienceLevel: data.experienceLevel,
-          yearsOfExperience: data.yearsOfExperience,
-          focusAreas: data.focusAreas,
-          isSessionOver: data.status === 'completed',
-          messages: data.messages
-        });
-
-        console.log("Behavioral Coach hydrated authoritative session from backend:", data.sessionId);
-      } catch (err) {
-        console.warn("Could not hydrate interview session from backend:", err.message);
-      }
-    };
-
-    hydrateAuthoritativeSession();
-    return () => {
-      isMounted = false;
-    };
-  }, [sessionId, isLoggedIn, getToken, saveBehavioralState]);
-
   const saveBehavioralState = useCallback(
     (overrides = {}) => {
       if (!behavioralStorageKey) return;
       try {
         const stateToSave = {
           messages: overrides.messages !== undefined ? overrides.messages : messages,
-          targetRole: overrides.targetRole !== undefined ? overrides.targetRole : targetRole,
-          targetCompany: overrides.targetCompany !== undefined ? overrides.targetCompany : targetCompany,
-          interviewType: overrides.interviewType !== undefined ? overrides.interviewType : interviewType,
-          difficulty: overrides.difficulty !== undefined ? overrides.difficulty : difficulty,
-          experienceLevel: overrides.experienceLevel !== undefined ? overrides.experienceLevel : experienceLevel,
-          yearsOfExperience: overrides.yearsOfExperience !== undefined ? overrides.yearsOfExperience : yearsOfExperience,
-          focusAreas: overrides.focusAreas !== undefined ? overrides.focusAreas : focusAreas,
+          targetRole: (overrides.targetRole !== undefined ? overrides.targetRole : targetRole) ?? '',
+          targetCompany: (overrides.targetCompany !== undefined ? overrides.targetCompany : targetCompany) ?? 'Tech Company',
+          interviewType: (overrides.interviewType !== undefined ? overrides.interviewType : interviewType) ?? 'Behavioral',
+          difficulty: (overrides.difficulty !== undefined ? overrides.difficulty : difficulty) ?? 'Medium',
+          startingDifficulty: (overrides.startingDifficulty !== undefined ? overrides.startingDifficulty : startingDifficulty) ?? 'Medium',
+          adaptiveDifficulty: (overrides.adaptiveDifficulty !== undefined ? overrides.adaptiveDifficulty : adaptiveDifficulty) ?? 'Medium',
+          experienceLevel: (overrides.experienceLevel !== undefined ? overrides.experienceLevel : experienceLevel) ?? 'fresher',
+          yearsOfExperience: (overrides.yearsOfExperience !== undefined ? overrides.yearsOfExperience : yearsOfExperience) ?? '',
+          focusAreas: (overrides.focusAreas !== undefined ? overrides.focusAreas : focusAreas) ?? '',
           stagePlan: overrides.stagePlan !== undefined ? overrides.stagePlan : stagePlan,
           currentStageIndex: overrides.currentStageIndex !== undefined ? overrides.currentStageIndex : currentStageIndex,
           useResume: overrides.useResume !== undefined ? overrides.useResume : useResume,
@@ -751,6 +664,8 @@ const BehavioralCoach = () => {
       targetCompany,
       interviewType,
       difficulty,
+      startingDifficulty,
+      adaptiveDifficulty,
       experienceLevel,
       yearsOfExperience,
       focusAreas,
@@ -762,6 +677,144 @@ const BehavioralCoach = () => {
       showSetup
     ]
   );
+
+  useEffect(() => {
+    saveBehavioralStateRef.current = saveBehavioralState;
+  }, [saveBehavioralState]);
+
+  useEffect(() => {
+    if (!behavioralStorageKey) return;
+    try {
+      const savedState = localStorage.getItem(behavioralStorageKey);
+      if (!savedState) return;
+
+      const parsedState = JSON.parse(savedState);
+      if (parsedState.sessionId) setSessionId(parsedState.sessionId);
+      if (Array.isArray(parsedState.messages) && parsedState.messages.length > 0) {
+        setMessages(parsedState.messages);
+      }
+      if (parsedState.targetRole != null) setTargetRole(String(parsedState.targetRole));
+      if (parsedState.targetCompany != null) setTargetCompany(String(parsedState.targetCompany));
+      if (parsedState.interviewType != null) setInterviewType(String(parsedState.interviewType));
+      if (parsedState.difficulty != null) setDifficulty(String(parsedState.difficulty));
+      if (parsedState.startingDifficulty != null) {
+        setStartingDifficulty(String(parsedState.startingDifficulty));
+      } else if (parsedState.difficulty != null) {
+        setStartingDifficulty(String(parsedState.difficulty));
+      }
+      if (parsedState.adaptiveDifficulty != null) {
+        setAdaptiveDifficulty(String(parsedState.adaptiveDifficulty));
+      } else if (parsedState.difficulty != null) {
+        setAdaptiveDifficulty(String(parsedState.difficulty));
+      }
+      if (parsedState.experienceLevel != null) setExperienceLevel(String(parsedState.experienceLevel));
+      if (parsedState.yearsOfExperience !== undefined) {
+        setYearsOfExperience(parsedState.yearsOfExperience != null ? String(parsedState.yearsOfExperience) : '');
+      }
+      if (parsedState.focusAreas !== undefined) {
+        setFocusAreas(parsedState.focusAreas != null ? String(parsedState.focusAreas) : '');
+      }
+      if (Array.isArray(parsedState.stagePlan)) setStagePlan(parsedState.stagePlan);
+      if (typeof parsedState.currentStageIndex === 'number') setCurrentStageIndex(parsedState.currentStageIndex);
+      if (parsedState.useResume !== undefined) setUseResume(Boolean(parsedState.useResume));
+      if (parsedState.isSessionOver !== undefined) setIsSessionOver(Boolean(parsedState.isSessionOver));
+      if (parsedState.activityRecorded !== undefined) setActivityRecorded(Boolean(parsedState.activityRecorded));
+      if (parsedState.showSetup !== undefined) setShowSetup(Boolean(parsedState.showSetup));
+
+      console.log("Behavioral Coach state restored from localStorage.");
+    } catch (error) {
+      console.error("Failed to restore Behavioral Coach state:", error);
+    }
+  }, [behavioralStorageKey]);
+
+  // ---------------------------------------------------------
+  // Authoritative Backend Session Hydration on Mount/Reload
+  // ---------------------------------------------------------
+  useEffect(() => {
+    let isMounted = true;
+    const hydrateAuthoritativeSession = async () => {
+      if (!sessionId || !isLoggedIn) return;
+      if (lastHydratedSessionIdRef.current === sessionId) return;
+
+      try {
+        const token = await getToken();
+        if (!token || !isMounted) return;
+
+        const res = await axios.get(
+          `${import.meta.env.VITE_API_URL}/api/interview/${sessionId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+
+        if (!isMounted || !res.data) return;
+
+        lastHydratedSessionIdRef.current = sessionId;
+
+        const data = res.data;
+        if (Array.isArray(data.stagePlan) && data.stagePlan.length > 0) {
+          setStagePlan(data.stagePlan);
+        }
+        if (typeof data.currentStageIndex === 'number') {
+          setCurrentStageIndex(data.currentStageIndex);
+        }
+        if (data.targetRole) setTargetRole(String(data.targetRole));
+        if (data.targetCompany) setTargetCompany(String(data.targetCompany));
+        if (data.interviewType) setInterviewType(String(data.interviewType));
+        if (data.difficulty) setDifficulty(String(data.difficulty));
+        if (data.startingDifficulty) setStartingDifficulty(String(data.startingDifficulty));
+        if (data.adaptiveDifficulty) setAdaptiveDifficulty(String(data.adaptiveDifficulty));
+        if (data.experienceLevel) setExperienceLevel(String(data.experienceLevel));
+        if (data.yearsOfExperience !== undefined) {
+          setYearsOfExperience(data.yearsOfExperience != null ? String(data.yearsOfExperience) : '');
+        }
+        if (data.focusAreas !== undefined) {
+          setFocusAreas(data.focusAreas != null ? String(data.focusAreas) : '');
+        }
+        if (data.status === 'completed') setIsSessionOver(true);
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          setMessages((prev) => {
+            if (
+              prev.length === data.messages.length &&
+              prev[prev.length - 1]?.text === data.messages[data.messages.length - 1]?.text &&
+              prev[0]?.text === data.messages[0]?.text
+            ) {
+              return prev;
+            }
+            return data.messages;
+          });
+        }
+
+        saveBehavioralStateRef.current?.({
+          sessionId: data.sessionId,
+          stagePlan: data.stagePlan,
+          currentStageIndex: data.currentStageIndex,
+          targetRole: data.targetRole ?? '',
+          targetCompany: data.targetCompany ?? 'Tech Company',
+          interviewType: data.interviewType ?? 'Behavioral',
+          difficulty: data.difficulty ?? 'Medium',
+          startingDifficulty: data.startingDifficulty || data.difficulty || 'Medium',
+          adaptiveDifficulty: data.adaptiveDifficulty || data.difficulty || 'Medium',
+          experienceLevel: data.experienceLevel ?? 'fresher',
+          yearsOfExperience: data.yearsOfExperience != null ? String(data.yearsOfExperience) : '',
+          focusAreas: data.focusAreas ?? '',
+          isSessionOver: data.status === 'completed',
+          messages: data.messages
+        });
+
+        console.log("Behavioral Coach hydrated authoritative session from backend:", data.sessionId);
+      } catch (err) {
+        console.warn("Could not hydrate interview session from backend:", err.message);
+      }
+    };
+
+    hydrateAuthoritativeSession();
+    return () => {
+      isMounted = false;
+    };
+  }, [sessionId, isLoggedIn, getToken]);
 
   // ---------------------------------------------------------
   // Speech Synthesis Playback
@@ -794,13 +847,86 @@ const BehavioralCoach = () => {
     setIsSpeaking(false);
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  // ---------------------------------------------------------
+  // Chat Scrolling Logic: Keep position stable when reading up,
+  // auto-scroll on new message if already near bottom or user message.
+  // ---------------------------------------------------------
+  const checkIfNearBottom = useCallback(() => {
+    const container = chatContainerRef.current;
+    if (!container) return true;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return distanceFromBottom <= 120;
+  }, []);
 
+  const handleChatScroll = useCallback(() => {
+    if (chatContainerRef.current) {
+      isNearBottomRef.current = checkIfNearBottom();
+    }
+  }, [checkIfNearBottom]);
+
+  const scrollToBottom = useCallback((behavior = "smooth") => {
+    const container = chatContainerRef.current;
+    if (container) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior
+      });
+    } else if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior });
+    }
+  }, []);
+
+  // Message update scrolling
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
+    if (!messages || messages.length === 0) {
+      prevMessagesLengthRef.current = 0;
+      return;
+    }
+
+    const prevLength = prevMessagesLengthRef.current;
+    const currentLength = messages.length;
+
+    // Initial mount or session hydration
+    if (!isInitialScrolledRef.current && currentLength > 0) {
+      isInitialScrolledRef.current = true;
+      prevMessagesLengthRef.current = currentLength;
+      requestAnimationFrame(() => {
+        scrollToBottom("auto");
+      });
+      return;
+    }
+
+    // When new message is added
+    if (currentLength > prevLength) {
+      const latestMessage = messages[currentLength - 1];
+      const isUserMessage = latestMessage?.sender === 'user';
+
+      if (isUserMessage) {
+        // User sent message -> force scroll to bottom
+        isNearBottomRef.current = true;
+        requestAnimationFrame(() => {
+          scrollToBottom("smooth");
+        });
+      } else if (isNearBottomRef.current) {
+        // AI response -> only scroll if user was near bottom
+        requestAnimationFrame(() => {
+          scrollToBottom("smooth");
+        });
+      }
+      prevMessagesLengthRef.current = currentLength;
+    } else if (currentLength < prevLength) {
+      prevMessagesLengthRef.current = currentLength;
+    }
+  }, [messages, scrollToBottom]);
+
+  // Loading indicator scrolling (only if user is already near bottom)
+  useEffect(() => {
+    if (isLoading && isNearBottomRef.current) {
+      requestAnimationFrame(() => {
+        scrollToBottom("smooth");
+      });
+    }
+  }, [isLoading, scrollToBottom]);
 
   const startNewInterview = () => {
     stopSpeaking();
@@ -816,6 +942,10 @@ const BehavioralCoach = () => {
     setUploadSuccess(false);
     setShowSetup(true);
     setActivityRecorded(false);
+    isInitialScrolledRef.current = false;
+    lastHydratedSessionIdRef.current = null;
+    isNearBottomRef.current = true;
+    prevMessagesLengthRef.current = 0;
 
     if (behavioralStorageKey) {
       try {
@@ -890,7 +1020,7 @@ const BehavioralCoach = () => {
 
   const handleSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!(input ?? '').trim() || isLoading) return;
 
     stopSpeaking();
     stopVoiceRecording();
@@ -912,12 +1042,18 @@ const BehavioralCoach = () => {
     setMessages([]);
     setStagePlan([]);
     setCurrentStageIndex(0);
+    setStartingDifficulty(difficulty);
+    setAdaptiveDifficulty(difficulty);
     setErrorMessage(null);
     setInput('');
     setIsSessionOver(false);
     setActivityRecorded(false);
     setUploadSuccess(false);
     setShowSetup(true);
+    isInitialScrolledRef.current = false;
+    lastHydratedSessionIdRef.current = null;
+    isNearBottomRef.current = true;
+    prevMessagesLengthRef.current = 0;
 
     if (behavioralStorageKey) {
       try {
@@ -939,9 +1075,21 @@ const BehavioralCoach = () => {
       return;
     }
 
-    if (!targetRole.trim()) {
+    const trimmedRole = (targetRole ?? '').trim();
+    if (!trimmedRole) {
       setErrorMessage("Please enter a target role before starting the interview.");
       return;
+    }
+
+    const trimmedCompany = (targetCompany ?? '').trim() || 'Tech Company';
+    const trimmedFocusAreas = (focusAreas ?? '').trim();
+    const rawYears = (yearsOfExperience ?? '').toString().trim();
+    let parsedYears = null;
+    if (rawYears !== '') {
+      const num = Number(rawYears);
+      if (!Number.isNaN(num) && num >= 0) {
+        parsedYears = num;
+      }
     }
 
     setIsStartingInterview(true);
@@ -955,13 +1103,13 @@ const BehavioralCoach = () => {
       }
 
       const payload = {
-        targetRole: targetRole.trim(),
-        targetCompany: targetCompany.trim() || 'Tech Company',
+        targetRole: trimmedRole,
+        targetCompany: trimmedCompany,
         interviewType: interviewType || 'Behavioral',
         difficulty: difficulty || 'Medium',
         experienceLevel: experienceLevel || 'fresher',
-        yearsOfExperience: yearsOfExperience !== '' ? Number(yearsOfExperience) : null,
-        focusAreas: focusAreas.trim() || null,
+        yearsOfExperience: parsedYears,
+        focusAreas: trimmedFocusAreas || null,
         useResumeContext: Boolean(useResume)
       };
 
@@ -981,24 +1129,36 @@ const BehavioralCoach = () => {
       const initialMessages = [{ sender: 'ai', text: initialQuestion }];
       const stages = Array.isArray(response.data?.stagePlan) ? response.data.stagePlan : [];
       const stageIdx = typeof response.data?.currentStageIndex === 'number' ? response.data.currentStageIndex : 0;
+      const startDiff = response.data?.startingDifficulty || difficulty || 'Medium';
+      const adaptDiff = response.data?.adaptiveDifficulty || startDiff;
 
       setSessionId(newSessionId);
+      lastHydratedSessionIdRef.current = newSessionId;
+      isInitialScrolledRef.current = false;
+      isNearBottomRef.current = true;
+      setTargetRole(trimmedRole);
+      setTargetCompany(trimmedCompany);
+      setFocusAreas(trimmedFocusAreas);
       setMessages(initialMessages);
       setStagePlan(stages);
       setCurrentStageIndex(stageIdx);
+      setStartingDifficulty(startDiff);
+      setAdaptiveDifficulty(adaptDiff);
       setShowSetup(false);
       setIsSessionOver(false);
 
       saveBehavioralState({
         sessionId: newSessionId,
         messages: initialMessages,
-        targetRole,
-        targetCompany,
-        interviewType,
-        difficulty,
-        experienceLevel,
-        yearsOfExperience,
-        focusAreas,
+        targetRole: trimmedRole,
+        targetCompany: trimmedCompany,
+        interviewType: interviewType || 'Behavioral',
+        difficulty: difficulty || 'Medium',
+        startingDifficulty: startDiff,
+        adaptiveDifficulty: adaptDiff,
+        experienceLevel: experienceLevel || 'fresher',
+        yearsOfExperience: rawYears,
+        focusAreas: trimmedFocusAreas,
         stagePlan: stages,
         currentStageIndex: stageIdx,
         useResume,
@@ -1046,6 +1206,7 @@ const BehavioralCoach = () => {
     const newMessageHistory = [...messages, userMessage];
 
     if (messageText !== "USER_ACTION: End interview") {
+      isNearBottomRef.current = true;
       setMessages(newMessageHistory);
       setInput('');
       saveBehavioralState({
@@ -1106,6 +1267,11 @@ const BehavioralCoach = () => {
         : (isCompleted ? Math.max(0, (response.data?.stagePlan || stagePlan).length - 1) : currentStageIndex);
       setCurrentStageIndex(updatedStageIndex);
 
+      const updatedAdaptiveDifficulty = response.data?.adaptiveDifficulty || response.data?.adaptive_difficulty;
+      if (updatedAdaptiveDifficulty) {
+        setAdaptiveDifficulty(updatedAdaptiveDifficulty);
+      }
+
       speak(replyText);
 
       const aiResponse = { sender: 'ai', text: replyText };
@@ -1118,7 +1284,8 @@ const BehavioralCoach = () => {
         isSessionOver: isCompleted,
         sessionId: activeSessionId,
         stagePlan: response.data?.stagePlan || stagePlan,
-        currentStageIndex: updatedStageIndex
+        currentStageIndex: updatedStageIndex,
+        adaptiveDifficulty: updatedAdaptiveDifficulty || adaptiveDifficulty
       });
 
       if (
@@ -1183,12 +1350,7 @@ const BehavioralCoach = () => {
     }
   };
 
-  // Questions count for interview progress
-  const aiQuestionsCount = messages.filter(
-    (m) => m.sender === 'ai' && !isReportMessage(m.text)
-  ).length;
-  const targetTurns = 8;
-  const progressPercent = Math.min(100, Math.round((aiQuestionsCount / targetTurns) * 100));
+
 
   return (
     <div className="flex flex-col flex-1 h-[85vh] md:h-full p-4 pt-4 bg-surface/70 rounded-lg border border-text-secondary/20 relative">
@@ -1221,7 +1383,7 @@ const BehavioralCoach = () => {
                 </label>
                 <input
                   type="text"
-                  value={targetRole}
+                  value={targetRole ?? ''}
                   onChange={(e) => {
                     const value = e.target.value;
                     setTargetRole(value);
@@ -1240,7 +1402,7 @@ const BehavioralCoach = () => {
                 </label>
                 <input
                   type="text"
-                  value={targetCompany}
+                  value={targetCompany ?? ''}
                   onChange={(e) => {
                     const value = e.target.value;
                     setTargetCompany(value);
@@ -1258,7 +1420,7 @@ const BehavioralCoach = () => {
                   Experience Level
                 </label>
                 <select
-                  value={experienceLevel}
+                  value={experienceLevel ?? 'fresher'}
                   onChange={(e) => {
                     const value = e.target.value;
                     setExperienceLevel(value);
@@ -1287,7 +1449,7 @@ const BehavioralCoach = () => {
                   min="0"
                   max="40"
                   step="0.5"
-                  value={yearsOfExperience}
+                  value={yearsOfExperience ?? ''}
                   onChange={(e) => {
                     const val = e.target.value;
                     setYearsOfExperience(val);
@@ -1306,7 +1468,7 @@ const BehavioralCoach = () => {
                 </label>
                 <textarea
                   rows={2}
-                  value={focusAreas}
+                  value={focusAreas ?? ''}
                   onChange={(e) => {
                     const val = e.target.value;
                     setFocusAreas(val);
@@ -1472,7 +1634,7 @@ const BehavioralCoach = () => {
             <div className="flex items-center gap-1.5 bg-surface/80 border border-text-secondary/25 px-2.5 py-1.5 rounded-lg text-xs">
               <span className="text-text-secondary font-medium hidden sm:inline">Voice:</span>
               <select
-                value={selectedVoiceName}
+                value={selectedVoiceName ?? ''}
                 onChange={(e) => {
                   const val = e.target.value;
                   setSelectedVoiceName(val);
@@ -1529,7 +1691,7 @@ const BehavioralCoach = () => {
               </label>
               <div className="relative">
                 <select
-                  value={targetCompany}
+                  value={targetCompany ?? 'Tech Company'}
                   onChange={(e) => {
                     const val = e.target.value;
                     setTargetCompany(val);
@@ -1558,7 +1720,7 @@ const BehavioralCoach = () => {
               </label>
               <div className="relative">
                 <select
-                  value={experienceLevel}
+                  value={experienceLevel ?? 'fresher'}
                   onChange={(e) => {
                     const val = e.target.value;
                     setExperienceLevel(val);
@@ -1611,9 +1773,16 @@ const BehavioralCoach = () => {
 
             {/* Difficulty */}
             <div>
-              <label className="block text-[11px] font-semibold text-text-secondary mb-1">
-                Difficulty
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] font-semibold text-text-secondary">
+                  Difficulty
+                </label>
+                {sessionId && (
+                  <span className="text-[10px] text-text-secondary/70">
+                    Draft for restart
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-3 gap-1.5 p-1 bg-background/80 rounded-xl border border-text-secondary/25">
                 {['Easy', 'Medium', 'Hard'].map((diff) => {
                   const active = difficulty === diff;
@@ -1734,9 +1903,20 @@ const BehavioralCoach = () => {
                     <p className="text-xs font-semibold text-text-primary">
                       {completedStages} of {totalStages} Stages Completed
                     </p>
-                    <p className="text-[11px] text-text-secondary mt-0.5 leading-snug">
-                      {difficulty} • {interviewType} • {levelLabel}
-                    </p>
+                    <div className="text-[11px] text-text-secondary mt-0.5 leading-snug flex items-center gap-1.5 flex-wrap">
+                      <span className="font-semibold text-emerald-400">
+                        {adaptiveDifficulty || startingDifficulty || difficulty}
+                      </span>
+                      {startingDifficulty && (adaptiveDifficulty || startingDifficulty) !== startingDifficulty && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-medium">
+                          Adaptive (from {startingDifficulty})
+                        </span>
+                      )}
+                      <span>•</span>
+                      <span>{interviewType}</span>
+                      <span>•</span>
+                      <span>{levelLabel}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -1784,7 +1964,11 @@ const BehavioralCoach = () => {
         {/* RIGHT COLUMN: Chat conversation & Voice Studio */}
         <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
           {/* Chat Messages */}
-          <div className="flex-1 overflow-y-auto pr-2 space-y-4 mb-3">
+          <div
+            ref={chatContainerRef}
+            onScroll={handleChatScroll}
+            className="flex-1 overflow-y-auto pr-2 space-y-4 mb-3"
+          >
             {errorMessage && !showSetup && (
               <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-lg text-sm mb-2 flex items-start gap-2">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
@@ -1986,7 +2170,7 @@ const BehavioralCoach = () => {
                 {/* 1. Status prompt */}
                 <div className="text-center mb-1">
                   <span className="text-xs font-medium text-text-secondary">
-                    {isRecording ? "Listening... Speak now" : input.trim() ? "Ready to send (review transcript below)" : "Tap microphone to speak"}
+                    {isRecording ? "Listening... Speak now" : (input ?? '').trim() ? "Ready to send (review transcript below)" : "Tap microphone to speak"}
                   </span>
                 </div>
 
@@ -1998,7 +2182,7 @@ const BehavioralCoach = () => {
                   statusText={
                     isRecording
                       ? "Listening... Speak now"
-                      : input.trim()
+                      : (input ?? '').trim()
                       ? "Ready to send"
                       : "Tap microphone to speak"
                   }
@@ -2017,7 +2201,7 @@ const BehavioralCoach = () => {
                     <Activity size={16} className="text-emerald-400 shrink-0 mt-0.5 animate-pulse" />
                     <textarea
                       rows={2}
-                      value={input}
+                      value={input ?? ''}
                       onChange={(e) => setInput(e.target.value)}
                       placeholder="Review and edit your spoken answer..."
                       className="flex-1 bg-transparent text-emerald-300 font-medium text-xs leading-relaxed outline-none resize-none placeholder:text-emerald-600/70"
@@ -2025,7 +2209,7 @@ const BehavioralCoach = () => {
                     <button
                       type="button"
                       onClick={submitVoiceAnswer}
-                      disabled={isLoading || !input.trim()}
+                      disabled={isLoading || !(input ?? '').trim()}
                       className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold text-xs shadow-md hover:bg-emerald-400 transition-all disabled:opacity-50"
                       title="Send answer"
                     >
@@ -2093,7 +2277,7 @@ const BehavioralCoach = () => {
               <form onSubmit={handleSubmit} className="flex items-center gap-2 md:gap-3 mb-16 md:mb-0">
                 <input
                   type="text"
-                  value={input}
+                  value={input ?? ''}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder={
                     isLoading
@@ -2123,7 +2307,7 @@ const BehavioralCoach = () => {
                 <button
                   type="submit"
                   className="bg-emerald-500 p-3 rounded-xl text-slate-950 font-bold hover:bg-emerald-400 transition-colors disabled:opacity-50 shrink-0"
-                  disabled={isLoading || !input.trim()}
+                  disabled={isLoading || !(input ?? '').trim()}
                   title="Submit Answer"
                 >
                   {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}

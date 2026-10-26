@@ -21,6 +21,8 @@ class InterviewState(TypedDict):
     target_company: str | None
     interview_type: str
     difficulty: str
+    starting_difficulty: str
+    adaptive_difficulty: str
     stage_plan: list[str]
     current_stage_index: int
     experience_level: str
@@ -243,6 +245,25 @@ def update_interview_history(state: InterviewState):
     }
 
 
+DIFFICULTY_LEVELS = ["Easy", "Medium", "Hard"]
+
+
+def compute_adaptive_difficulty(current_diff: str, action: str) -> str:
+    cur = (current_diff or "Medium").capitalize()
+    if cur not in DIFFICULTY_LEVELS:
+        cur = "Medium"
+
+    idx = DIFFICULTY_LEVELS.index(cur)
+    if action == "HARDER":
+        new_idx = min(idx + 1, len(DIFFICULTY_LEVELS) - 1)
+    elif action == "EASIER":
+        new_idx = max(idx - 1, 0)
+    else:
+        new_idx = idx
+
+    return DIFFICULTY_LEVELS[new_idx]
+
+
 def decide_next_action(state: InterviewState):
     print("Deciding next interview action...")
     t0 = time.perf_counter()
@@ -252,12 +273,20 @@ def decide_next_action(state: InterviewState):
     questions_count = len(state["interview_history"])
     stage_plan = state.get("stage_plan") or []
     current_idx = state.get("current_stage_index") or 0
+    cur_diff = state.get("adaptive_difficulty") or state.get("difficulty") or "Medium"
+    starting_diff = state.get("starting_difficulty") or cur_diff
 
     # If candidate explicitly requests to end the interview, respect it
     end_signals = ["end interview", "i want to stop", "stop interview", "quit", "wrap up", "exit interview", "i am done", "that's all i have"]
     if any(sig in answer_lower for sig in end_signals):
         print(f"[Turn Timing] operation=decide_next_action duration_ms=0.01 action=END reason=candidate_requested")
-        return {"next_action": "END", "current_stage_index": max(0, len(stage_plan) - 1)}
+        return {
+            "next_action": "END",
+            "current_stage_index": max(0, len(stage_plan) - 1),
+            "adaptive_difficulty": cur_diff,
+            "difficulty": cur_diff,
+            "starting_difficulty": starting_diff,
+        }
 
     # If candidate says "I don't know" or is stuck, NEVER prematurely end the interview
     idk_signals = ["i don't know", "i dont know", "not sure", "no idea", "i am not familiar", "haven't learned", "skip this"]
@@ -272,12 +301,21 @@ def decide_next_action(state: InterviewState):
         return {
             "next_action": "SIMILAR",
             "current_stage_index": next_stage_idx,
+            "adaptive_difficulty": cur_diff,
+            "difficulty": cur_diff,
+            "starting_difficulty": starting_diff,
         }
 
     # If all stages in the stage plan have already been answered
     if stage_plan and current_idx >= len(stage_plan) - 1 and questions_count >= len(stage_plan) - 1:
         print(f"[Turn Timing] operation=decide_next_action action=END reason=stage_plan_completed")
-        return {"next_action": "END", "current_stage_index": len(stage_plan) - 1}
+        return {
+            "next_action": "END",
+            "current_stage_index": len(stage_plan) - 1,
+            "adaptive_difficulty": cur_diff,
+            "difficulty": cur_diff,
+            "starting_difficulty": starting_diff,
+        }
 
     prompt = f"""
 You are deciding the next step in an adaptive interview.
@@ -288,8 +326,8 @@ Target role:
 Interview type:
 {state.get("interview_type") or "Behavioral"}
 
-Baseline difficulty:
-{state.get("difficulty") or "Medium"}
+Current adaptive difficulty:
+{cur_diff}
 
 Candidate experience level:
 {exp_level}
@@ -345,12 +383,18 @@ EASIER, SIMILAR, HARDER, or END.
         else:
             next_stage_idx = min(current_idx + 1, max(0, len(stage_plan) - 1))
 
+    # Compute updated adaptive difficulty
+    new_adaptive_diff = compute_adaptive_difficulty(cur_diff, action)
+
     duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-    print(f"[Turn Timing] operation=decide_next_action duration_ms={duration_ms} action={action} next_stage_idx={next_stage_idx} status=success")
+    print(f"[Turn Timing] operation=decide_next_action duration_ms={duration_ms} action={action} cur_diff={cur_diff} new_diff={new_adaptive_diff} next_stage_idx={next_stage_idx} status=success")
 
     return {
         "next_action": action,
         "current_stage_index": next_stage_idx,
+        "adaptive_difficulty": new_adaptive_diff,
+        "difficulty": new_adaptive_diff,
+        "starting_difficulty": starting_diff,
     }
 
 
@@ -358,10 +402,11 @@ def generate_next_question(state: InterviewState):
     print("Generating next question...")
     t0 = time.perf_counter()
 
-    difficulty_dir = state["next_action"]
+    difficulty_dir = state.get("next_action") or "SIMILAR"
     exp_level = state.get("experience_level") or "fresher"
     interview_type = state.get("interview_type") or "Behavioral"
-    base_diff = state.get("difficulty") or "Medium"
+    adaptive_diff = state.get("adaptive_difficulty") or state.get("difficulty") or "Medium"
+    starting_diff = state.get("starting_difficulty") or adaptive_diff
     years = state.get("years_of_experience")
     years_str = f" ({years} years)" if years else ""
     focus = f"\nCandidate focus areas: {state.get('focus_areas')}" if state.get("focus_areas") else ""
@@ -370,14 +415,14 @@ def generate_next_question(state: InterviewState):
     current_idx = state.get("current_stage_index") or 0
     current_stage_name = stage_plan[current_idx] if (stage_plan and current_idx < len(stage_plan)) else "In-depth Discussion"
 
-    # Difficulty instructions
+    # Active adaptive difficulty instructions
     diff_instructions = ""
-    if base_diff.lower() == "easy":
-        diff_instructions = "Baseline Difficulty: Easy. Prioritize foundational principles, direct applications, and approachable questions with gentle guidance."
-    elif base_diff.lower() == "hard":
-        diff_instructions = "Baseline Difficulty: Hard. Probe for deep architectural or situational reasoning, complex edge cases, non-trivial constraints, and high-stakes trade-offs."
+    if adaptive_diff.lower() == "easy":
+        diff_instructions = "Active Adaptive Difficulty: Easy. Prioritize foundational principles, direct applications, and approachable questions with gentle guidance."
+    elif adaptive_diff.lower() == "hard":
+        diff_instructions = "Active Adaptive Difficulty: Hard. Probe for deep architectural or situational reasoning, complex edge cases, non-trivial constraints, and high-stakes trade-offs."
     else:
-        diff_instructions = "Baseline Difficulty: Medium. Focus on practical real-world applications, multi-step problem solving, and standard trade-offs."
+        diff_instructions = "Active Adaptive Difficulty: Medium. Focus on practical real-world applications, multi-step problem solving, and standard trade-offs."
 
     # Interview type instructions
     type_instructions = ""
