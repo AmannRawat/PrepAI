@@ -14,6 +14,7 @@ import estree from 'prettier/plugins/estree';
 
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
+import { trackEvent, ALLOWED_EVENTS } from '../utils/analytics.js';
 import {
   CheckCircle,
   AlertCircle,
@@ -554,6 +555,10 @@ const DsaArena = () => {
           generatedProblem.topic || topic,
           generatedProblem.difficulty || difficulty
         );
+        trackEvent(ALLOWED_EVENTS.DSA_PROBLEM_GENERATED, {
+          topic: generatedProblem.topic || topic,
+          difficulty: generatedProblem.difficulty || difficulty,
+        });
       }
     } catch (err) {
       const errorMessage = err.response?.data?.error
@@ -808,6 +813,15 @@ const DsaArena = () => {
       const data = response.data;
       setExecutionResults(data);
       lastSubmittedCodeRef.current = code;
+
+      trackEvent(ALLOWED_EVENTS.DSA_SUBMISSION_COMPLETED, {
+        language,
+        topic,
+        difficulty: problemPayload.difficulty || difficulty,
+        verdict: data?.verdict || 'Unknown',
+        passed_tests_count: Number(data?.passedTests) || 0,
+        total_tests_count: Number(data?.totalTests) || 0,
+      });
 
       const aiFeedback = data.feedback || {
         correctness: data.correctness,
@@ -1167,9 +1181,9 @@ const DsaArena = () => {
         </button>
       </div>
 
-      <div className="flex flex-1 flex-col lg:flex-row gap-5 overflow-hidden">
+      <div className="flex flex-1 flex-col lg:flex-row gap-5 overflow-visible lg:overflow-hidden">
         {/* Problem Details Panel (Left) */}
-        <div className="lg:w-2/5 flex flex-col bg-surface/70 backdrop-blur-md rounded-2xl border border-border/70 overflow-hidden shadow-lg">
+        <div className="lg:w-2/5 flex flex-col bg-surface/70 backdrop-blur-md rounded-2xl border border-border/70 overflow-hidden shadow-lg min-h-[320px] lg:min-h-0">
           {/* Problem Tabs Header matching reference mockup */}
           <div className="flex items-center gap-1 p-2 bg-surface-elevated/40 border-b border-border/40 shrink-0">
             <button
@@ -1377,7 +1391,7 @@ const DsaArena = () => {
         </div>
 
         {/* Editor and Feedback Panel (Right) */}
-        <div className="lg:w-3/5 flex flex-col gap-5 overflow-hidden">
+        <div className="lg:w-3/5 flex flex-col gap-5 overflow-visible lg:overflow-hidden">
           <div className="flex-1 flex flex-col bg-surface/70 backdrop-blur-md rounded-2xl border border-border/70 overflow-hidden shadow-lg">
             {/* Editor Top Bar matching reference mockup */}
             <div className="bg-surface-elevated/40 px-4 py-2.5 border-b border-border/40 flex justify-between items-center shrink-0">
@@ -1417,7 +1431,7 @@ const DsaArena = () => {
             </div>
 
             {/* CodeMirror Code Workspace */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto min-h-[280px] sm:min-h-[340px]">
               <CodeMirror
                 value={code}
                 height="100%"
@@ -1429,7 +1443,7 @@ const DsaArena = () => {
             </div>
 
             {/* Bottom Actions Bar: [▶ Run] [✓ Clear] [Submit] matching reference mockup */}
-            <div className="p-3 bg-surface-elevated/40 border-t border-border/40 flex items-center justify-between gap-3 shrink-0">
+            <div className="p-3 bg-surface-elevated/40 border-t border-border/40 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 shrink-0">
               <div className="flex items-center gap-2">
                 <button
                   type="button"

@@ -51,7 +51,7 @@ If there is no useful durable information:
 }}
 """
 
-    response = generate_text(prompt)
+    response = generate_text(prompt, stage="memory_extraction")
 
     try:
         return json.loads(response)

@@ -41,6 +41,7 @@ import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { trackEvent, ALLOWED_EVENTS } from '../utils/analytics.js';
 import PepeAvatar from '../components/PepeAvatar';
 import AudioWaveform from '../components/AudioWaveform';
 import { SpeechTranscriptAccumulator, processSpeechVoices } from '../utils/speechUtils';
@@ -255,10 +256,11 @@ const InterviewReportCard = ({
 };
 
 const BehavioralCoach = () => {
-  const { getToken, isLoggedIn, userId, userName } = useAuth();
+  const { getToken, isLoggedIn, userId, userName, userImageUrl } = useAuth();
   const { openLogin } = useModal();
   const navigate = useNavigate();
 
+  const [userAvatarError, setUserAvatarError] = useState(false);
   const userInitial = userName ? userName.trim().charAt(0).toUpperCase() : 'A';
 
   // Session & conversation state
@@ -721,7 +723,9 @@ const BehavioralCoach = () => {
       if (parsedState.activityRecorded !== undefined) setActivityRecorded(Boolean(parsedState.activityRecorded));
       if (parsedState.showSetup !== undefined) setShowSetup(Boolean(parsedState.showSetup));
 
-      console.log("Behavioral Coach state restored from localStorage.");
+      if (import.meta.env.DEV) {
+        console.debug("[Behavioral Coach] State restored from localStorage");
+      }
     } catch (error) {
       console.error("Failed to restore Behavioral Coach state:", error);
     }
@@ -735,6 +739,9 @@ const BehavioralCoach = () => {
     const hydrateAuthoritativeSession = async () => {
       if (!sessionId || !isLoggedIn) return;
       if (lastHydratedSessionIdRef.current === sessionId) return;
+
+      // Synchronously mark as in-flight to prevent duplicate fetch in React StrictMode
+      lastHydratedSessionIdRef.current = sessionId;
 
       try {
         const token = await getToken();
@@ -750,8 +757,6 @@ const BehavioralCoach = () => {
         );
 
         if (!isMounted || !res.data) return;
-
-        lastHydratedSessionIdRef.current = sessionId;
 
         const data = res.data;
         if (Array.isArray(data.stagePlan) && data.stagePlan.length > 0) {
@@ -804,8 +809,11 @@ const BehavioralCoach = () => {
           messages: data.messages
         });
 
-        console.log("Behavioral Coach hydrated authoritative session from backend:", data.sessionId);
+        if (import.meta.env.DEV) {
+          console.debug("[Behavioral Coach] Authoritative session hydrated from backend");
+        }
       } catch (err) {
+        lastHydratedSessionIdRef.current = null; // Allow retry on failure
         console.warn("Could not hydrate interview session from backend:", err.message);
       }
     };
@@ -1147,6 +1155,15 @@ const BehavioralCoach = () => {
       setShowSetup(false);
       setIsSessionOver(false);
 
+      trackEvent(ALLOWED_EVENTS.BEHAVIORAL_INTERVIEW_STARTED, {
+        role_category: trimmedRole,
+        company_name: COMPANY_OPTIONS.includes(trimmedCompany) ? trimmedCompany : 'other',
+        interview_type: interviewType || 'Behavioral',
+        difficulty: difficulty || 'Medium',
+        experience_level: experienceLevel || 'fresher',
+        uses_resume: Boolean(useResume),
+      });
+
       saveBehavioralState({
         sessionId: newSessionId,
         messages: initialMessages,
@@ -1255,6 +1272,14 @@ const BehavioralCoach = () => {
         setIsSessionOver(true);
         const report = response.data?.final_report || "Interview completed. Thank you!";
         replyText = `### Interview Completed\n\n${report}`;
+
+        trackEvent(ALLOWED_EVENTS.BEHAVIORAL_INTERVIEW_COMPLETED, {
+          role_category: targetRole,
+          company_name: COMPANY_OPTIONS.includes(targetCompany) ? targetCompany : 'other',
+          interview_type: interviewType || 'Behavioral',
+          final_difficulty: adaptiveDifficulty || difficulty || 'Medium',
+          turns_count: Math.floor((messages?.length || 0) / 2) + 1,
+        });
       } else {
         replyText = response.data?.question || response.data?.reply || "Could you elaborate further?";
       }
@@ -1290,26 +1315,30 @@ const BehavioralCoach = () => {
 
       if (
         isLoggedIn &&
-        token &&
         !activityRecorded &&
         messageText !== "USER_ACTION: End interview"
       ) {
-        axios.post(
-          `${import.meta.env.VITE_API_URL}/api/user/record-activity`,
-          {},
-          {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
+        (async () => {
+          try {
+            const freshToken = await getToken();
+            if (!freshToken) return;
+            await axios.post(
+              `${import.meta.env.VITE_API_URL}/api/user/record-activity`,
+              {},
+              {
+                headers: {
+                  Authorization: `Bearer ${freshToken}`
+                }
+              }
+            );
+            setActivityRecorded(true);
+            saveBehavioralState({
+              activityRecorded: true
+            });
+          } catch (actErr) {
+            console.warn("Ancillary activity recording notice:", actErr.message);
           }
-        ).then(() => {
-          setActivityRecorded(true);
-          saveBehavioralState({
-            activityRecorded: true
-          });
-        }).catch(err => {
-          console.error("Failed to record activity:", err);
-        });
+        })();
       }
     } catch (err) {
       console.error("Error submitting answer to interview session:", err);
@@ -2117,8 +2146,17 @@ const BehavioralCoach = () => {
                   </div>
 
                   {!isAi && (
-                    <div className="w-8 h-8 rounded-full bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
-                      {userInitial}
+                    <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 mt-0.5 border border-cyan-500/40 shadow-sm flex items-center justify-center bg-cyan-600/30 text-cyan-300 font-bold text-xs">
+                      {userImageUrl && !userAvatarError ? (
+                        <img
+                          src={userImageUrl}
+                          alt={userName || "User"}
+                          className="w-full h-full object-cover"
+                          onError={() => setUserAvatarError(true)}
+                        />
+                      ) : (
+                        <span>{userInitial}</span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2166,7 +2204,7 @@ const BehavioralCoach = () => {
           {!isSessionOver ? (
             isVoiceMode ? (
               /* MODERN VOICE RECORDING STUDIO (Matches Reference Screenshot) */
-              <div className="bg-surface/95 border border-emerald-500/30 rounded-2xl p-4 shadow-2xl backdrop-blur-md mb-2 animate-in fade-in zoom-in duration-200">
+              <div className="bg-surface/95 border border-emerald-500/30 rounded-2xl p-4 shadow-2xl backdrop-blur-md mb-16 md:mb-2 animate-in fade-in zoom-in duration-200">
                 {/* 1. Status prompt */}
                 <div className="text-center mb-1">
                   <span className="text-xs font-medium text-text-secondary">

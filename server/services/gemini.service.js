@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { startTrace, endTrace } from "./langsmith.service.js";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -30,9 +31,23 @@ export async function generateText(prompt, options = {}) {
       break;
     }
 
+    const traceRun = startTrace({
+      stage,
+      promptLength: prompt?.length || 0,
+      model: "gemini-3.5-flash-lite",
+    });
+
     try {
       if (typeof customGenerator === "function") {
-        return await customGenerator(prompt, options);
+        const customResult = await customGenerator(prompt, options);
+        if (traceRun) {
+          endTrace(traceRun, {
+            responseLength: typeof customResult === "string" ? customResult.length : 0,
+            durationMs: Date.now() - attemptStart,
+            model: "gemini-3.5-flash-lite",
+          });
+        }
+        return customResult;
       }
 
       // Enforce bounded request timeout on the model request using AbortSignal
@@ -41,11 +56,33 @@ export async function generateText(prompt, options = {}) {
         timeout: timeoutMs,
         signal: abortSignal,
       });
-      return result.response.text();
+
+      const responseText = result.response.text();
+      const usageMetadata = result.response.usageMetadata;
+      const attemptDuration = Date.now() - attemptStart;
+
+      if (traceRun) {
+        endTrace(traceRun, {
+          responseLength: responseText?.length || 0,
+          usageMetadata,
+          durationMs: attemptDuration,
+          model: "gemini-3.5-flash-lite",
+        });
+      }
+
+      return responseText;
     } catch (err) {
       lastError = err;
       const attemptDuration = Date.now() - attemptStart;
       const totalDuration = Date.now() - startTime;
+
+      if (traceRun) {
+        endTrace(traceRun, {
+          durationMs: attemptDuration,
+          error: err,
+          model: "gemini-3.5-flash-lite",
+        });
+      }
 
       const isTimeout =
         err.name === "AbortError" ||

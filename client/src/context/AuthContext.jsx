@@ -1,5 +1,6 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect } from "react";
 import { useAuth as useClerkAuth, useUser, useClerk } from "@clerk/react";
+import { identifyUser, resetUser } from "../utils/analytics.js";
 
 const AuthContext = createContext(null);
 
@@ -19,11 +20,22 @@ export const AuthProvider = ({ children }) => {
 
     const isLoaded = authLoaded && userLoaded;
 
+    useEffect(() => {
+        if (!isLoaded) return;
+
+        if (isSignedIn && user?.id) {
+            identifyUser(user.id);
+        } else if (!isSignedIn) {
+            resetUser();
+        }
+    }, [isLoaded, isSignedIn, user?.id]);
+
     const login = async () => {
         return getToken();
     };
 
     const logout = async () => {
+        resetUser();
         await clerk.signOut();
     };
 

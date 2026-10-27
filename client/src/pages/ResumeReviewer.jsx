@@ -23,6 +23,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
 import axios from 'axios';
+import { trackEvent, ALLOWED_EVENTS } from '../utils/analytics.js';
 
 const SAMPLE_JOB_DESCRIPTIONS = [
   {
@@ -239,6 +240,11 @@ const ResumeReviewer = () => {
       formData.append('jobTitle', jobTitle.trim());
     }
 
+    trackEvent(ALLOWED_EVENTS.RESUME_REVIEW_STARTED, {
+      has_job_description: Boolean(trimmedJd),
+      file_format: 'pdf',
+    });
+
     try {
       const token = await getToken();
       if (!token) {
@@ -258,6 +264,16 @@ const ResumeReviewer = () => {
 
       const reviewData = response.data;
       setFeedback(reviewData);
+
+      const score = Number(reviewData?.atsAssessment?.estimatedScore) || 0;
+      const scoreBucket = score >= 80 ? '80-100' : score >= 60 ? '60-79' : '0-59';
+      const scoreTier = score >= 80 ? 'strong' : score >= 60 ? 'moderate' : 'low';
+      trackEvent(ALLOWED_EVENTS.RESUME_REVIEW_COMPLETED, {
+        score_bucket: scoreBucket,
+        match_tier: scoreTier,
+        has_job_description: Boolean(trimmedJd),
+        has_gaps: Boolean(reviewData?.skillsAssessment?.missingSkills?.length),
+      });
 
       saveResumeState({
         fileName: selectedFile.name,

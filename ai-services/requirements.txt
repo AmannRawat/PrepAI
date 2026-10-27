@@ -9,3 +9,5 @@ pypdf
 python-multipart
 langgraph
 langgraph-checkpoint-sqlite
+langsmith>=0.14.9
+langchain-core>=1.6.11

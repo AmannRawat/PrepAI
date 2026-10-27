@@ -49,6 +49,7 @@ app.use("/api", dsaRoutes);
 app.use("/api", behavioralRoutes);
 
 app.use("/api", resumeRoutes);
+app.use("/api/resume", resumeRoutes);
 
 //ROUTE TO GET USER PROGRESS FOR DASHBOARD 
 app.use("/api/user", userRoutes);

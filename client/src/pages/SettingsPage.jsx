@@ -42,6 +42,7 @@ import { useModal } from '../context/ModalContext';
 import { useTheme } from '../context/ThemeContext';
 import { validateImageFile, formatBytes } from '../utils/backgroundStorage';
 import { processSpeechVoices } from '../utils/speechUtils';
+import { trackEvent, ALLOWED_EVENTS } from '../utils/analytics.js';
 
 const TARGET_ROLES = [
   'Backend Developer',
@@ -137,6 +138,7 @@ const SettingsPage = () => {
   // Preferred Resume states
   const [resumes, setResumes] = useState([]);
   const [isLoadingResumes, setIsLoadingResumes] = useState(false);
+  const [resumesError, setResumesError] = useState(null);
   const [isSettingPreferred, setIsSettingPreferred] = useState(false);
   const [resumeActionMessage, setResumeActionMessage] = useState(null);
 
@@ -278,6 +280,7 @@ const SettingsPage = () => {
   const fetchUserResumes = useCallback(async () => {
     if (!isLoggedIn) return;
     setIsLoadingResumes(true);
+    setResumesError(null);
     try {
       const token = await getToken();
       if (!token) return;
@@ -290,6 +293,7 @@ const SettingsPage = () => {
       }
     } catch (err) {
       console.error('Failed to fetch user resumes:', err);
+      setResumesError(err.response?.data?.message || 'Could not load your uploaded resumes. Please try again.');
     } finally {
       setIsLoadingResumes(false);
     }
@@ -713,6 +717,10 @@ const SettingsPage = () => {
         URL.revokeObjectURL(pendingUpload.previewUrl);
         setPendingUpload(null);
         setCustomActionSuccess('applied');
+        trackEvent(ALLOWED_EVENTS.SETTINGS_PREFERENCE_CHANGED, {
+          setting_type: 'wallpaper',
+          new_value: 'custom',
+        });
         setTimeout(() => setCustomActionSuccess(null), 3000);
       } else {
         setUploadError('Failed to apply custom background.');
@@ -1041,6 +1049,17 @@ const SettingsPage = () => {
                   <div className="p-8 text-center text-xs text-text-secondary animate-pulse">
                     Loading your indexed resumes...
                   </div>
+                ) : resumesError ? (
+                  <div className="p-6 rounded-xl border border-red-500/30 bg-red-500/10 text-center space-y-3">
+                    <p className="text-xs text-red-400 font-medium">{resumesError}</p>
+                    <button
+                      type="button"
+                      onClick={fetchUserResumes}
+                      className="px-3.5 py-1.5 rounded-lg bg-surface-elevated hover:bg-surface-elevated/80 border border-border text-xs font-semibold text-text-primary transition cursor-pointer"
+                    >
+                      Retry Loading Resumes
+                    </button>
+                  </div>
                 ) : resumes.length === 0 ? (
                   <div className="p-6 rounded-xl border border-dashed border-border/80 text-center space-y-3">
                     <div className="w-12 h-12 rounded-full bg-surface-elevated mx-auto flex items-center justify-center text-text-secondary">
@@ -1245,7 +1264,13 @@ const SettingsPage = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md">
               <button
                 type="button"
-                onClick={() => setTheme('dark')}
+                onClick={() => {
+                  setTheme('dark');
+                  trackEvent(ALLOWED_EVENTS.SETTINGS_PREFERENCE_CHANGED, {
+                    setting_type: 'theme',
+                    new_value: 'dark',
+                  });
+                }}
                 className={`p-3.5 rounded-xl border flex items-center justify-between transition cursor-pointer ${
                   theme === 'dark'
                     ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 ring-1 ring-emerald-500/30 shadow-xs'
@@ -1261,7 +1286,13 @@ const SettingsPage = () => {
 
               <button
                 type="button"
-                onClick={() => setTheme('light')}
+                onClick={() => {
+                  setTheme('light');
+                  trackEvent(ALLOWED_EVENTS.SETTINGS_PREFERENCE_CHANGED, {
+                    setting_type: 'theme',
+                    new_value: 'light',
+                  });
+                }}
                 className={`p-3.5 rounded-xl border flex items-center justify-between transition cursor-pointer ${
                   theme === 'light'
                     ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 ring-1 ring-emerald-500/30 shadow-xs'
@@ -1303,7 +1334,13 @@ const SettingsPage = () => {
                   <button
                     key={bg.id}
                     type="button"
-                    onClick={() => selectBuiltInBg(bg.id)}
+                    onClick={() => {
+                      selectBuiltInBg(bg.id);
+                      trackEvent(ALLOWED_EVENTS.SETTINGS_PREFERENCE_CHANGED, {
+                        setting_type: 'wallpaper',
+                        new_value: bg.id,
+                      });
+                    }}
                     className={`relative rounded-xl overflow-hidden border transition-all duration-200 group text-left aspect-video cursor-pointer touch-manipulation focus:outline-none ${
                       isSelected
                         ? 'border-emerald-400 ring-2 ring-emerald-400/50 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
@@ -1974,7 +2011,11 @@ const SettingsPage = () => {
 
                     <button
                       type="button"
-                      onClick={logout}
+                      onClick={() => {
+                        if (window.confirm('Are you sure you want to sign out of PrepAI?')) {
+                          logout();
+                        }
+                      }}
                       className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 text-red-400 font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
                     >
                       <LogOut size={14} />

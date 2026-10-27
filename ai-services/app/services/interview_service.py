@@ -71,7 +71,7 @@ CANDIDATE'S ANSWER:
 Generate the interviewer's response.
 """
 
-    response = generate_text(prompt)
+    response = generate_text(prompt, stage="interview_response")
 
     return {
         "response": response,

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { LogIn } from 'lucide-react';
 import Sidebar from './Sidebar';
@@ -9,6 +10,18 @@ import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
 import { useTheme } from '../context/ThemeContext';
 import { motion, AnimatePresence } from 'framer-motion';
+import { trackEvent, ALLOWED_EVENTS } from '../utils/analytics.js';
+
+const ROUTE_FEATURE_MAP = {
+  '/': 'dashboard',
+  '/dsa-arena': 'dsa_arena',
+  '/behavioral-coach': 'behavioral_coach',
+  '/resume-reviewer': 'resume_reviewer',
+  '/progress': 'progress_profile',
+  '/profile': 'progress_profile',
+  '/calendar': 'calendar',
+  '/settings': 'settings',
+};
 
 const Layout = () => {
   const location = useLocation();
@@ -16,6 +29,13 @@ const Layout = () => {
   const { userName, userImageUrl, isLoggedIn, isLoaded } = useAuth();
   const { openLogin } = useModal();
   const { dashboardBg, isBgLoading, theme } = useTheme();
+
+  useEffect(() => {
+    const featureName = ROUTE_FEATURE_MAP[location.pathname];
+    if (featureName) {
+      trackEvent(ALLOWED_EVENTS.FEATURE_OPENED, { feature_name: featureName });
+    }
+  }, [location.pathname]);
 
   const userInitial = userName ? userName.charAt(0).toUpperCase() : null;
 
@@ -106,7 +126,7 @@ const Layout = () => {
         </header>
 
         {/* Content Area with Page Transitions */}
-        <div className={`flex-1 flex flex-col relative z-10 ${isDashboard ? 'p-0' : 'p-4 sm:p-6 md:p-8'}`}>
+        <div className={`flex-1 flex flex-col relative z-10 pb-20 md:pb-0 ${isDashboard ? 'p-0 pb-20 md:pb-0' : 'p-4 sm:p-6 md:p-8 pb-24 md:pb-8'}`}>
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}

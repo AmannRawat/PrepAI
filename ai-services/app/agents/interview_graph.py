@@ -197,7 +197,7 @@ Evaluation Guidelines:
 Return a concise evaluation.
 """
 
-    evaluation = generate_text(prompt)
+    evaluation = generate_text(prompt, stage="answer_evaluation")
     duration_ms = round((time.perf_counter() - t0) * 1000, 2)
     print(f"[Turn Timing] operation=evaluate_answer duration_ms={duration_ms} status=success")
 
@@ -365,7 +365,7 @@ Return ONLY one word:
 EASIER, SIMILAR, HARDER, or END.
 """
 
-    action = generate_text(prompt).strip().upper()
+    action = generate_text(prompt, stage="adaptive_decision").strip().upper()
 
     allowed_actions = {"EASIER", "SIMILAR", "HARDER", "END"}
     if action not in allowed_actions:
@@ -518,7 +518,7 @@ Rules:
 9. Return ONLY the question text.
 """
 
-    question = generate_text(prompt).strip()
+    question = generate_text(prompt, stage="question_generation").strip()
     duration_ms = round((time.perf_counter() - t0) * 1000, 2)
     print(f"[Turn Timing] operation=generate_next_question duration_ms={duration_ms} status=success")
 
@@ -611,7 +611,7 @@ Format the report with these clear sections using Markdown:
 **Rationale:** [1-2 sentences summarizing the justification for this verdict based strictly on demonstrated evidence]
 """
 
-    report = generate_text(prompt)
+    report = generate_text(prompt, stage="final_report")
     duration_ms = round((time.perf_counter() - t0) * 1000, 2)
     print(f"[Turn Timing] operation=generate_final_report duration_ms={duration_ms} length={len(report)} status=success")
 

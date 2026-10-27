@@ -65,13 +65,13 @@ router.get(
 );
 
 router.get(
-    "/my-resumes",
+    ["/my-resumes", "/resume/my-resumes"],
     authMiddleware,
     getUserResumes
 );
 
 router.put(
-    "/preferred",
+    ["/preferred", "/resume/preferred"],
     authMiddleware,
     setPreferredResume
 );

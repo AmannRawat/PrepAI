@@ -6,84 +6,52 @@ import {
   MessageSquare,
   FileText,
   User,
-  LogOut,
-  LogIn
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
 
 const MobileNav = () => {
-  const { logout, isLoggedIn, isLoaded } = useAuth();
-  const { openLogin } = useModal();
-  const navigate = useNavigate();
-
-  const handleLoginClick = () => {
-    if (openLogin) {
-      openLogin();
-    } else {
-      navigate('/login');
-    }
-  };
-
   const getNavLinkClass = ({ isActive }) => {
     return isActive
-      ? 'flex flex-col items-center justify-center w-full h-full text-accent'
-      : 'flex flex-col items-center justify-center w-full h-full text-text-secondary hover:text-text-primary transition-colors';
+      ? 'flex flex-col items-center justify-center w-full h-full text-accent min-w-0 px-0.5'
+      : 'flex flex-col items-center justify-center w-full h-full text-text-secondary hover:text-text-primary transition-colors min-w-0 px-0.5';
   };
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-surface/90 backdrop-blur-md border-t border-text-secondary/20 h-16 flex items-center z-50 pb-safe">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-surface/90 backdrop-blur-md border-t border-text-secondary/20 h-16 flex items-center z-50 pb-safe shadow-lg">
 
-      <NavLink to="/" className={getNavLinkClass} end>
-        <Home size={22} />
-        <span className="text-[10px] mt-1">Home</span>
+      <NavLink to="/" className={getNavLinkClass} end aria-label="Home">
+        <Home size={20} />
+        <span className="text-[10px] mt-0.5 font-medium">Home</span>
       </NavLink>
 
-      <NavLink to="/dsa-arena" className={getNavLinkClass}>
-        <Code size={22} />
-        <span className="text-[10px] mt-1">DSA</span>
+      <NavLink to="/dsa-arena" className={getNavLinkClass} aria-label="DSA Arena">
+        <Code size={20} />
+        <span className="text-[10px] mt-0.5 font-medium">DSA</span>
       </NavLink>
 
-      <NavLink to="/behavioral-coach" className={getNavLinkClass}>
-        <MessageSquare size={22} />
-        <span className="text-[10px] mt-1">Coach</span>
+      <NavLink to="/behavioral-coach" className={getNavLinkClass} aria-label="Behavioral Coach">
+        <MessageSquare size={20} />
+        <span className="text-[10px] mt-0.5 font-medium">Coach</span>
       </NavLink>
 
-      <NavLink to="/resume-reviewer" className={getNavLinkClass}>
-        <FileText size={22} />
-        <span className="text-[10px] mt-1">Resume</span>
+      <NavLink to="/resume-reviewer" className={getNavLinkClass} aria-label="Resume Reviewer">
+        <FileText size={20} />
+        <span className="text-[10px] mt-0.5 font-medium">Resume</span>
       </NavLink>
 
-      <NavLink to="/profile" className={getNavLinkClass}>
-        <User size={22} />
-        <span className="text-[10px] mt-1">Profile</span>
+      <NavLink to="/profile" className={getNavLinkClass} aria-label="Profile and Progress">
+        <User size={20} />
+        <span className="text-[10px] mt-0.5 font-medium">Profile</span>
       </NavLink>
 
-      {/* Auth action: Logout if logged in, Login if logged out */}
-      {isLoaded && (
-        isLoggedIn ? (
-          <button
-            type="button"
-            onClick={logout}
-            className="flex flex-col items-center justify-center w-full h-full text-text-secondary hover:text-red-400 transition-colors"
-          >
-            <LogOut size={22} />
-            <span className="text-[10px] mt-1">Logout</span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={handleLoginClick}
-            className="flex flex-col items-center justify-center w-full h-full text-accent hover:text-accent-darker transition-colors"
-            aria-label="Login or Sign in"
-          >
-            <LogIn size={22} />
-            <span className="text-[10px] mt-1">Login</span>
-          </button>
-        )
-      )}
+      <NavLink to="/settings" className={getNavLinkClass} aria-label="Settings">
+        <Settings size={20} />
+        <span className="text-[10px] mt-0.5 font-medium">Settings</span>
+      </NavLink>
 
-    </div>
+    </nav>
   );
 };
 

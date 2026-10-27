@@ -2,6 +2,7 @@ import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { useModal } from "../context/ModalContext";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { trackEvent, ALLOWED_EVENTS } from "../utils/analytics.js";
 import {
     Check,
     Copy,
@@ -1049,6 +1050,12 @@ export default function DsaCoach({
                 if (newPlan && typeof newPlan === "object") {
                     setPersonalizedPlan(newPlan);
                     setShowPlan(true);
+
+                    trackEvent(ALLOWED_EVENTS.STUDY_PLAN_CREATED, {
+                        daily_target: Number(newPlan?.dailyTarget) || 1,
+                        has_topics: Boolean(newProfile?.weakTopics || onboardingProfile?.weakTopics),
+                        plan_type: "coach_personalized",
+                    });
                 }
 
                 if (isLoggedIn && (newProfile || newPlan)) {

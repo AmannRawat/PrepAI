@@ -885,6 +885,15 @@ const Dashboard = () => {
               );
             })}
           </div>
+
+          <button
+            type="button"
+            onClick={() => navigate('/calendar')}
+            className="mt-3 pt-2.5 border-t border-slate-200/80 dark:border-white/5 flex items-center justify-between text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition cursor-pointer group"
+          >
+            <span>View Full Activity Calendar</span>
+            <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" />
+          </button>
         </div>
       </div>
     </div>
