@@ -1,5 +1,6 @@
 import { Router } from "express";
 import authMiddleware from "../middleware/auth.middleware.js";
+import { expensiveAiLimiter } from "../middleware/rateLimiter.js";
 
 import {
   generateProblem,
@@ -17,16 +18,16 @@ import {
 
 const router = Router();
 
-router.post("/generate-problem", authMiddleware, generateProblem);
+router.post("/generate-problem", authMiddleware, expensiveAiLimiter, generateProblem);
 
 router.post("/run-code", authMiddleware, runCode);
-router.post("/evaluate-code", authMiddleware, evaluateCode);
+router.post("/evaluate-code", authMiddleware, expensiveAiLimiter, evaluateCode);
 
 // DSA Coach endpoints
-router.post("/hint", authMiddleware, getHint);
-router.post("/explain-approach", authMiddleware, explainApproach);
-router.post("/show-solution", authMiddleware, showSolution);
-router.post("/coach-chat", authMiddleware, coachChat);
+router.post("/hint", authMiddleware, expensiveAiLimiter, getHint);
+router.post("/explain-approach", authMiddleware, expensiveAiLimiter, explainApproach);
+router.post("/show-solution", authMiddleware, expensiveAiLimiter, showSolution);
+router.post("/coach-chat", authMiddleware, expensiveAiLimiter, coachChat);
 router.post("/coach-clear", authMiddleware, clearCoachData);
 
 // Adaptive Difficulty endpoint

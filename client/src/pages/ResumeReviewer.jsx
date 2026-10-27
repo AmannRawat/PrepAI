@@ -95,6 +95,7 @@ const ResumeReviewer = () => {
 
   // Restore the previous Resume Reviewer state when the component loads
   useEffect(() => {
+    let isMounted = true;
     if (!resumeStorageKey) return;
 
     try {
@@ -114,23 +115,29 @@ const ResumeReviewer = () => {
     // If no localStorage record, try fetching the latest review from the backend
     if (isLoggedIn && getToken) {
       getToken().then(async (token) => {
-        if (!token) return;
+        if (!token || !isMounted) return;
         try {
           const res = await axios.get(
             `${import.meta.env.VITE_API_URL}/api/review-resume/latest`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
-          if (res.data?.review) {
+          if (isMounted && res.data?.review) {
             const rev = res.data.review;
             setFeedback(rev);
             if (rev.jobTitle) setJobTitle(rev.jobTitle);
             if (rev.jobDescription) setJobDescription(rev.jobDescription);
           }
         } catch (fetchErr) {
-          console.warn("Failed to fetch latest resume review from server:", fetchErr.message);
+          if (isMounted) {
+            console.warn("Failed to fetch latest resume review from server:", fetchErr.message);
+          }
         }
       });
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [resumeStorageKey, isLoggedIn, getToken]);
 
   // Save the Resume Reviewer state to localStorage

@@ -24,9 +24,13 @@ services:
     depends_on:
       - backend # Ensures the backend boots up BEFORE the frontend starts
     restart: unless-stopped
+  # 3. Local Vector Database (Optional for local development; skipped in production when using Qdrant Cloud)
   qdrant:
     image: qdrant/qdrant:latest
     container_name: prepai-qdrant
+    profiles:
+      - local
+      - dev
     ports:
       - "6333:6333"
       - "6334:6334"

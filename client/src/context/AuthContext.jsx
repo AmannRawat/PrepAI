@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect } from "react";
 import { useAuth as useClerkAuth, useUser, useClerk } from "@clerk/react";
 import { identifyUser, resetUser } from "../utils/analytics.js";
+import { clearApiCache } from "../utils/api.js";
 
 const AuthContext = createContext(null);
 
@@ -27,6 +28,7 @@ export const AuthProvider = ({ children }) => {
             identifyUser(user.id);
         } else if (!isSignedIn) {
             resetUser();
+            clearApiCache();
         }
     }, [isLoaded, isSignedIn, user?.id]);
 
@@ -36,6 +38,7 @@ export const AuthProvider = ({ children }) => {
 
     const logout = async () => {
         resetUser();
+        clearApiCache();
         await clerk.signOut();
     };
 

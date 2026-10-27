@@ -28,6 +28,8 @@ const testSuites = [
   "security.test.js",
   "settings-ia-integration.test.js",
   "settings-preferences.test.js",
+  "rate-limiter.test.js",
+  "gemini-failover.test.js",
 ];
 
 console.log("=================================================");

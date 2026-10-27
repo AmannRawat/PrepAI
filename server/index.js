@@ -5,6 +5,7 @@ import cors from "cors";
 import { clerkMiddleware } from "@clerk/express";
 
 import { connectDB } from "./config/db.js";
+import { generalLimiter, parseTrustProxy } from "./middleware/rateLimiter.js";
 
 import authRoutes from "./routes/auth.routes.js";
 import dsaRoutes from "./routes/dsa.routes.js";
@@ -15,10 +16,23 @@ import interviewRoutes from "./routes/interview.routes.js";
 
 const PORT = process.env.PORT || 5000;
 
+// Validate required service-to-service authentication secret at startup
+if (!process.env.AI_SERVICE_SECRET || !process.env.AI_SERVICE_SECRET.trim()) {
+    console.error("[Startup Configuration Error] Missing required environment variable: AI_SERVICE_SECRET must be configured to authenticate requests to the AI service.");
+    process.exit(1);
+}
 
 const app = express();
-// Initialize Clerk authentication
+
+// Configure trust proxy safely (supports boolean, hop count, and validated subnet/IP lists)
+const trustProxySetting = parseTrustProxy(process.env.TRUST_PROXY);
+app.set("trust proxy", trustProxySetting);
+
+// Initialize Clerk authentication first so getAuth(req) is available for rate-limit keying
 app.use(clerkMiddleware());
+
+// Apply general API rate limiter across all incoming endpoints (skips / and /ping)
+app.use(generalLimiter);
 
 // app.use("/api/auth", authRoutes);
 // Middleware

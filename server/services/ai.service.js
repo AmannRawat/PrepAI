@@ -4,6 +4,22 @@ const AI_SERVICE_URL =
 export const AI_SERVICE_TIMEOUT_MS =
   parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 120000;
 
+export function getAiServiceSecret() {
+  const secret = process.env.AI_SERVICE_SECRET;
+  if (!secret || !secret.trim()) {
+    throw new Error(
+      "[Configuration Error] Missing required environment variable: AI_SERVICE_SECRET must be configured to communicate with AI services."
+    );
+  }
+  return secret.trim();
+}
+
+function getInternalHeaders(customHeaders = {}) {
+  const headers = { ...customHeaders };
+  headers["x-internal-service-key"] = getAiServiceSecret();
+  return headers;
+}
+
 export async function uploadResume(file) {
   const formData = new FormData();
 
@@ -24,6 +40,7 @@ export async function uploadResume(file) {
     `${AI_SERVICE_URL}/upload-pdf`,
     {
       method: "POST",
+      headers: getInternalHeaders(),
       body: formData,
     }
   );
@@ -50,7 +67,10 @@ export async function retrieveResumeContext(
   });
 
   const response = await fetch(
-    `${AI_SERVICE_URL}/rag?${params.toString()}`
+    `${AI_SERVICE_URL}/rag?${params.toString()}`,
+    {
+      headers: getInternalHeaders(),
+    }
   );
 
   if (!response.ok) {
@@ -78,9 +98,9 @@ export async function generateInterviewResponse(
     {
       method: "POST",
 
-      headers: {
+      headers: getInternalHeaders({
         "Content-Type": "application/json",
-      },
+      }),
 
       body: JSON.stringify({
         document_id: documentId,
@@ -114,9 +134,9 @@ export async function extractMemories(
     `${AI_SERVICE_URL}/extract-memories`,
     {
       method: "POST",
-      headers: {
+      headers: getInternalHeaders({
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify({
         question,
         answer,
@@ -141,9 +161,9 @@ export async function startInterview(data) {
         `${AI_SERVICE_URL}/interview/start`,
         {
             method: "POST",
-            headers: {
+            headers: getInternalHeaders({
                 "Content-Type": "application/json",
-            },
+            }),
             body: JSON.stringify(data),
             signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
         }
@@ -169,9 +189,9 @@ export async function submitInterviewAnswer(
         `${AI_SERVICE_URL}/interview/${sessionId}/answer`,
         {
             method: "POST",
-            headers: {
+            headers: getInternalHeaders({
                 "Content-Type": "application/json",
-            },
+            }),
             body: JSON.stringify({
                 answer,
             }),

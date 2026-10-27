@@ -60,6 +60,7 @@ def ingest_chunks(
 def retrieve_context(
     query: str,
     document_id: str,
+    raise_on_error: bool = False,
 ):
     try:
         query_embedding = create_embedding(query)
@@ -67,10 +68,13 @@ def retrieve_context(
         results = search_similar(
             query_embedding,
             document_id=document_id,
+            raise_on_error=raise_on_error,
         )
 
         return results
     except Exception as e:
+        if raise_on_error:
+            raise
         print(f"Warning: Vector retrieval unavailable ({e}). Continuing without vector context.")
         return []
 
@@ -82,6 +86,7 @@ def generate_rag_answer(
     results = retrieve_context(
         query=query,
         document_id=document_id,
+        raise_on_error=True,
     )
 
     context = "\n\n".join(

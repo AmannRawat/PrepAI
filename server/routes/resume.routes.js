@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 
 import authMiddleware from "../middleware/auth.middleware.js";
+import { resumeReviewLimiter } from "../middleware/rateLimiter.js";
 import {
     reviewResume,
     getLatestResumeReview,
@@ -54,6 +55,7 @@ function handleResumeUpload(req, res, next) {
 router.post(
     "/review-resume",
     authMiddleware,
+    resumeReviewLimiter,
     handleResumeUpload,
     reviewResume
 );

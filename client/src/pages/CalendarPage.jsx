@@ -68,63 +68,77 @@ const CalendarPage = () => {
     setCurrentDate(new Date());
   };
 
-  const fetchCalendarData = useCallback(async () => {
-    if (!isLoaded || !isLoggedIn) {
-      setActiveDays([]);
-      setStreak(0);
-      setStreakStartDate(null);
-      setMilestones([]);
-      setIsLoading(false);
-      setError(null);
-      return;
-    }
+  useEffect(() => {
+    let isMounted = true;
 
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const token = await getToken();
-      if (!token) {
-        setIsLoading(false);
+    const runFetch = async () => {
+      if (!isLoaded || !isLoggedIn) {
+        if (isMounted) {
+          setActiveDays([]);
+          setStreak(0);
+          setStreakStartDate(null);
+          setMilestones([]);
+          setIsLoading(false);
+          setError(null);
+        }
         return;
       }
 
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-      const res = await axios.get(
-        `${import.meta.env.VITE_API_URL}/api/user/calendar`,
-        {
-          params: {
-            year,
-            month: month + 1,
-            timezone: tz,
-          },
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (res.data) {
-        setActiveDays(Array.isArray(res.data.activeDays) ? res.data.activeDays : []);
-        setStreak(typeof res.data.currentStreak === 'number' ? res.data.currentStreak : 0);
-        setStreakStartDate(res.data.streakStartDate || null);
-        setMilestones(Array.isArray(res.data.todayMilestones) ? res.data.todayMilestones : []);
+      if (isMounted) {
+        setIsLoading(true);
+        setError(null);
       }
-    } catch (err) {
-      console.error('Failed to fetch calendar activity:', err);
-      setError('Unable to load your activity data. Please try again.');
-      setActiveDays([]);
-      setStreak(0);
-      setStreakStartDate(null);
-      setMilestones([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [getToken, isLoaded, isLoggedIn, month, year]);
 
-  useEffect(() => {
-    fetchCalendarData();
-  }, [fetchCalendarData, userId]);
+      try {
+        const token = await getToken();
+        if (!token || !isMounted) {
+          if (isMounted) setIsLoading(false);
+          return;
+        }
+
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const res = await axios.get(
+          `${import.meta.env.VITE_API_URL}/api/user/calendar`,
+          {
+            params: {
+              year,
+              month: month + 1,
+              timezone: tz,
+            },
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (isMounted && res.data) {
+          setActiveDays(Array.isArray(res.data.activeDays) ? res.data.activeDays : []);
+          setStreak(typeof res.data.currentStreak === 'number' ? res.data.currentStreak : 0);
+          setStreakStartDate(res.data.streakStartDate || null);
+          setMilestones(Array.isArray(res.data.todayMilestones) ? res.data.todayMilestones : []);
+        }
+      } catch (err) {
+        if (isMounted) {
+          console.error('Failed to fetch calendar activity:', err);
+          setError('Unable to load your activity data. Please try again.');
+          setActiveDays([]);
+          setStreak(0);
+          setStreakStartDate(null);
+          setMilestones([]);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    runFetch();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [getToken, isLoaded, isLoggedIn, month, year, userId]);
 
   const realToday = new Date();
   const isViewingCurrentMonth =

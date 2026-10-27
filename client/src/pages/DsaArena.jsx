@@ -124,6 +124,14 @@ const DsaArena = () => {
   const [hintsUsed, setHintsUsed] = useState(0);
   const [pendingProblemLoad, setPendingProblemLoad] = useState(null);
   const lastSubmittedCodeRef = useRef(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const handleGiveUp = useCallback(() => {
     setHasGivenUp(true);
@@ -550,24 +558,48 @@ const DsaArena = () => {
 
       const generatedProblem = response.data;
       if (generatedProblem) {
-        applyLoadProblem(
-          generatedProblem,
-          generatedProblem.topic || topic,
-          generatedProblem.difficulty || difficulty
-        );
+        if (isMountedRef.current) {
+          applyLoadProblem(
+            generatedProblem,
+            generatedProblem.topic || topic,
+            generatedProblem.difficulty || difficulty
+          );
+        } else if (dsaStorageKey) {
+          // If unmounted while generating, save the problem directly to localStorage
+          // so when the user returns to DSA Arena, the problem is ready and restored
+          try {
+            const current = latestStateRef.current || {};
+            const stateToSave = {
+              ...current,
+              problem: generatedProblem,
+              topic: generatedProblem.topic || topic,
+              difficulty: generatedProblem.difficulty || difficulty,
+              code: getBoilerplate(generatedProblem, language),
+              feedback: null,
+              runResults: null,
+              executionResults: null,
+              evaluationError: null,
+            };
+            localStorage.setItem(dsaStorageKey, JSON.stringify(stateToSave));
+          } catch {}
+        }
         trackEvent(ALLOWED_EVENTS.DSA_PROBLEM_GENERATED, {
           topic: generatedProblem.topic || topic,
           difficulty: generatedProblem.difficulty || difficulty,
         });
       }
     } catch (err) {
-      const errorMessage = err.response?.data?.error
-        ? err.response.data.error
-        : 'An unexpected error occurred.';
+      if (isMountedRef.current) {
+        const errorMessage = err.response?.data?.error
+          ? err.response.data.error
+          : 'An unexpected error occurred.';
 
-      setError(errorMessage);
+        setError(errorMessage);
+      }
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 

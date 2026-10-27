@@ -724,6 +724,7 @@ export default function DsaCoach({
 
     // Restore coach state from localStorage and backend on mount / userId change
     useEffect(() => {
+        let isMounted = true;
         let hasRestoredFromStorage = false;
         if (coachStorageKey) {
             try {
@@ -755,8 +756,8 @@ export default function DsaCoach({
         // Fetch authoritative study plan from server when authenticated
         if (isLoggedIn && getToken) {
             getToken().then(async (token) => {
-                if (!token) {
-                    if (!initializedRef.current) {
+                if (!token || !isMounted) {
+                    if (!initializedRef.current && isMounted) {
                         initializedRef.current = true;
                         if (!hasRestoredFromStorage) {
                             addAssistantMessage(
@@ -774,6 +775,8 @@ export default function DsaCoach({
                             headers: { Authorization: `Bearer ${token}` },
                         }
                     );
+                    if (!isMounted) return;
+
                     const { onboardingProfile: serverProfile, plan: serverPlan } = res.data || {};
                     if (serverProfile) {
                         setOnboardingProfile(serverProfile);
@@ -797,6 +800,7 @@ export default function DsaCoach({
                         }
                     }
                 } catch (fetchErr) {
+                    if (!isMounted) return;
                     console.warn("Failed to fetch study plan from server:", fetchErr.message);
                     if (!initializedRef.current) {
                         initializedRef.current = true;
@@ -818,6 +822,10 @@ export default function DsaCoach({
                 }
             }
         }
+
+        return () => {
+            isMounted = false;
+        };
     }, [coachStorageKey, addAssistantMessage, isLoggedIn, getToken]);
 
     // Save coach state to localStorage

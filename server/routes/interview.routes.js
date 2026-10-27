@@ -10,6 +10,10 @@ import {
 } from "../controllers/interview.controller.js";
 
 import authMiddleware from "../middleware/auth.middleware.js";
+import {
+    interviewStartLimiter,
+    resumeReviewLimiter,
+} from "../middleware/rateLimiter.js";
 
 const router = express.Router();
 
@@ -27,6 +31,7 @@ router.get(
 router.post(
     "/upload-resume",
     authMiddleware,
+    resumeReviewLimiter,
     upload.single("resume"),
     uploadInterviewResumeController
 );
@@ -34,6 +39,7 @@ router.post(
 router.post(
     "/start",
     authMiddleware,
+    interviewStartLimiter,
     startInterviewController
 );
 

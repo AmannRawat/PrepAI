@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
 import "./index.css";
+import "./utils/api.js";
 import { initAnalytics } from "./utils/analytics.js";
 
 // Initialize privacy-conscious product analytics centrally
