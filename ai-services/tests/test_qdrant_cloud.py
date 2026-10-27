@@ -8,11 +8,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from app.services.qdrant_service import (
     COLLECTION_NAME,
+    DEFAULT_COLLECTION_NAME,
     DEFAULT_VECTOR_SIZE,
     VectorServiceError,
     VectorServiceConfigurationError,
     VectorServiceUnavailableError,
     VectorServiceIncompatibleError,
+    get_collection_name,
+    get_vector_size,
     get_qdrant_config,
     get_qdrant_client,
     set_mock_qdrant_client,
@@ -62,6 +65,8 @@ class TestQdrantCloudMigration(unittest.TestCase):
         self.orig_url = os.environ.get("QDRANT_URL")
         self.orig_api_key = os.environ.get("QDRANT_API_KEY")
         self.orig_timeout = os.environ.get("QDRANT_TIMEOUT")
+        self.orig_collection = os.environ.get("QDRANT_COLLECTION")
+        self.orig_vector_size = os.environ.get("QDRANT_VECTOR_SIZE")
 
     def tearDown(self):
         reset_qdrant_client()
@@ -79,6 +84,16 @@ class TestQdrantCloudMigration(unittest.TestCase):
             os.environ["QDRANT_TIMEOUT"] = self.orig_timeout
         else:
             os.environ.pop("QDRANT_TIMEOUT", None)
+
+        if self.orig_collection is not None:
+            os.environ["QDRANT_COLLECTION"] = self.orig_collection
+        else:
+            os.environ.pop("QDRANT_COLLECTION", None)
+
+        if self.orig_vector_size is not None:
+            os.environ["QDRANT_VECTOR_SIZE"] = self.orig_vector_size
+        else:
+            os.environ.pop("QDRANT_VECTOR_SIZE", None)
 
     # -------------------------------------------------------------------------
     # 1 & 2. Client Configuration & Local Fallback Tests
@@ -306,6 +321,65 @@ class TestQdrantCloudMigration(unittest.TestCase):
         with patch("app.services.rag_service.create_embedding", return_value=[0.1] * 3072):
             with self.assertRaises(VectorServiceUnavailableError):
                 generate_rag_answer("Query about experience", "doc-123")
+
+    # -------------------------------------------------------------------------
+    # 11. Dedicated Collection Name & SiteMind Cluster Coexistence
+    # -------------------------------------------------------------------------
+
+    def test_default_collection_and_vector_size(self):
+        os.environ.pop("QDRANT_COLLECTION", None)
+        os.environ.pop("QDRANT_VECTOR_SIZE", None)
+        self.assertEqual(get_collection_name(), "prepai_knowledge")
+        self.assertEqual(get_vector_size(), 3072)
+        self.assertEqual(COLLECTION_NAME, "prepai_knowledge")
+
+    def test_custom_collection_name_from_env(self):
+        os.environ["QDRANT_COLLECTION"] = "prepai_custom_cloud"
+        self.assertEqual(get_collection_name(), "prepai_custom_cloud")
+
+        mock_client = MagicMock()
+        mock_client.get_collections.return_value = MockCollectionsResponse([])
+        set_mock_qdrant_client(mock_client)
+
+        create_collection(vector_size=3072)
+        mock_client.create_collection.assert_called_once()
+        self.assertEqual(mock_client.create_collection.call_args[1]["collection_name"], "prepai_custom_cloud")
+
+        # store_embedding targets custom collection
+        store_embedding("p-custom", [0.1] * 3072, "test", "doc", "f.pdf", 0)
+        self.assertEqual(mock_client.upsert.call_args[1]["collection_name"], "prepai_custom_cloud")
+
+        # search_similar targets custom collection
+        mock_client.get_collections.return_value = MockCollectionsResponse(["prepai_custom_cloud"])
+        mock_client.query_points.return_value = MockQueryResponse([])
+        search_similar([0.1] * 3072, document_id="doc-test")
+        self.assertEqual(mock_client.query_points.call_args[1]["collection_name"], "prepai_custom_cloud")
+
+    def test_dedicated_collection_separation_from_sitemind(self):
+        """Verify PrepAI operates strictly in its dedicated collection and never touches SiteMind collections."""
+        mock_client = MagicMock()
+        # Cluster already contains SiteMind collections
+        existing_cluster_collections = ["sitemind_production", "sitemind_vectors", "sitemind_rag"]
+        mock_client.get_collections.return_value = MockCollectionsResponse(existing_cluster_collections)
+        set_mock_qdrant_client(mock_client)
+
+        create_collection(vector_size=3072)
+
+        # Must create PrepAI's dedicated collection
+        mock_client.create_collection.assert_called_once()
+        created_name = mock_client.create_collection.call_args[1]["collection_name"]
+        self.assertEqual(created_name, "prepai_knowledge")
+
+        # Must NOT delete or alter any existing collections
+        mock_client.delete_collection.assert_not_called()
+
+    def test_custom_vector_size_from_env(self):
+        os.environ["QDRANT_VECTOR_SIZE"] = "1536"
+        self.assertEqual(get_vector_size(), 1536)
+
+        # Invalid string falls back safely to default 3072
+        os.environ["QDRANT_VECTOR_SIZE"] = "invalid_number"
+        self.assertEqual(get_vector_size(), 3072)
 
 
 if __name__ == "__main__":
