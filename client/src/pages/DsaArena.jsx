@@ -8,9 +8,7 @@ import { cpp } from '@codemirror/lang-cpp';
 import { java } from '@codemirror/lang-java';
 import { python } from '@codemirror/lang-python';
 
-import prettier from 'prettier/standalone';
-import babel from 'prettier/plugins/babel';
-import estree from 'prettier/plugins/estree';
+import { formatCode } from '../utils/codeFormatter.js';
 
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
@@ -44,6 +42,16 @@ const myEditorTheme = EditorView.theme({
     backgroundColor: '#0a101d',
     color: '#e2e8f0',
     height: '100%',
+  },
+  '.cm-cursor, .cm-dropCursor': {
+    borderLeftColor: '#38bdf8',
+    borderLeftWidth: '2px',
+  },
+  '&.cm-focused .cm-cursor': {
+    borderLeftColor: '#38bdf8',
+  },
+  '.cm-content': {
+    caretColor: '#38bdf8',
   },
   '.cm-gutters': {
     backgroundColor: '#070b14',
@@ -123,8 +131,11 @@ const DsaArena = () => {
   const [hasGivenUp, setHasGivenUp] = useState(false);
   const [hintsUsed, setHintsUsed] = useState(0);
   const [pendingProblemLoad, setPendingProblemLoad] = useState(null);
+  const [isFormatting, setIsFormatting] = useState(false);
+  const [formatFeedback, setFormatFeedback] = useState(null);
   const lastSubmittedCodeRef = useRef(null);
   const isMountedRef = useRef(true);
+  const editorViewRef = useRef(null);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -536,6 +547,7 @@ const DsaArena = () => {
 
   // Execute actual problem generation call without prematurely wiping existing state
   const executeGenerateProblem = async () => {
+    if (isLoading) return;
     setError(null);
     setIsLoading(true);
 
@@ -605,6 +617,7 @@ const DsaArena = () => {
 
   // Generate a new problem with unsaved-code guard.
   const generateProblem = async () => {
+    if (isLoading) return;
     if (!isLoggedIn) {
       openLogin();
       return;
@@ -905,28 +918,29 @@ const DsaArena = () => {
     }
   };
 
-  // Format JavaScript using Prettier.
-  const handleFormatCode = async () => {
-    try {
-      let parser;
-      let plugins;
+  // Format code across all supported languages (JavaScript, Python, Java, C++)
+  const handleFormatCode = useCallback(async () => {
+    if (!code || isFormatting) return;
+    setIsFormatting(true);
+    setFormatFeedback(null);
 
-      switch (language) {
-        case 'javascript':
-          parser = 'babel';
-          plugins = [babel, estree];
-          break;
-        default:
-          console.log(`Formatting for ${language} is not yet supported.`);
-          return;
+    try {
+      const view = editorViewRef.current;
+      const prevSelection = view ? view.state.selection.main : null;
+
+      const result = await formatCode(code, language);
+
+      if (!result.success) {
+        setFormatFeedback({ type: 'warning', message: result.error });
+        console.warn(`[Format Code] ${result.error}`);
+        return;
       }
 
-      const formattedCode = await prettier.format(code, {
-        parser,
-        plugins,
-        singleQuote: true,
-        trailingComma: 'es5',
-      });
+      const formattedCode = result.formatted;
+      if (formattedCode === code) {
+        setFormatFeedback({ type: 'info', message: 'Already formatted' });
+        return;
+      }
 
       setCode(formattedCode);
 
@@ -941,10 +955,42 @@ const DsaArena = () => {
         code: formattedCode,
         codeByLanguage: updatedCodeByLanguage,
       });
+
+      setFormatFeedback({ type: 'success', message: 'Formatted' });
+
+      // Restore cursor position if view is mounted
+      if (view && prevSelection) {
+        setTimeout(() => {
+          try {
+            const safeAnchor = Math.min(prevSelection.anchor, formattedCode.length);
+            const safeHead = Math.min(prevSelection.head, formattedCode.length);
+            view.dispatch({
+              selection: { anchor: safeAnchor, head: safeHead },
+              scrollIntoView: false,
+            });
+          } catch {}
+        }, 0);
+      }
     } catch (error) {
       console.error('Failed to format code:', error);
+      setFormatFeedback({ type: 'error', message: 'Failed to format' });
+    } finally {
+      setIsFormatting(false);
+      setTimeout(() => setFormatFeedback(null), 3500);
     }
-  };
+  }, [code, language, codeByLanguage, isFormatting, saveDsaState]);
+
+  // Keyboard shortcut listener for formatting (Shift+Alt+F / Alt+Shift+F)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.shiftKey && e.altKey && (e.key === 'F' || e.key === 'f')) {
+        e.preventDefault();
+        handleFormatCode();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleFormatCode]);
 
   // Close the results panel.
   const closeFeedbackPanel = () => {
@@ -1295,6 +1341,14 @@ const DsaArena = () => {
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
                     {problem.difficulty || difficulty}
                   </span>
+                  {problem.isFallback && (
+                    <span
+                      className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-400"
+                      title={problem.fallbackReason || 'Loaded from verified problem library'}
+                    >
+                      Verified Blueprint
+                    </span>
+                  )}
                 </div>
 
                 {/* TAB 1: PROBLEM DESCRIPTION */}
@@ -1437,11 +1491,25 @@ const DsaArena = () => {
               </div>
 
               <div className="flex items-center gap-2">
+                {formatFeedback && (
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded font-mono transition ${
+                      formatFeedback.type === 'error'
+                        ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                        : formatFeedback.type === 'warning'
+                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                        : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    }`}
+                  >
+                    {formatFeedback.message}
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={handleFormatCode}
-                  title="Format Code"
-                  className="p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface transition"
+                  disabled={isFormatting || !code}
+                  title="Format Code (Shift+Alt+F)"
+                  className="p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -1469,6 +1537,9 @@ const DsaArena = () => {
                 height="100%"
                 theme={myEditorTheme}
                 extensions={[langExtension]}
+                onCreateEditor={(view) => {
+                  editorViewRef.current = view;
+                }}
                 onChange={onChange}
                 style={{ fontSize: '14px' }}
               />

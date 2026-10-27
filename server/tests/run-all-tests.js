@@ -30,6 +30,7 @@ const testSuites = [
   "settings-preferences.test.js",
   "rate-limiter.test.js",
   "gemini-failover.test.js",
+  "consistency-gate-repair.test.js",
 ];
 
 console.log("=================================================");

@@ -135,7 +135,7 @@ function getModelForSlot(slot) {
 export async function generateText(prompt, options = {}) {
   const stage = typeof options === "string" ? options : (options?.stage || "general");
   const maxAttempts = options?.maxAttempts || 2;
-  const timeoutMs = options?.timeout || 25000;
+  const timeoutMs = options?.timeout || 35000;
   const overallDeadlineMs = options?.overallDeadlineMs || 55000;
   const startTime = Date.now();
 
@@ -281,7 +281,23 @@ export async function generateText(prompt, options = {}) {
 
       try {
         const abortSignal = AbortSignal.timeout(timeoutMs);
-        const result = await model.generateContent(prompt, {
+        const requestPayload =
+          options.responseMimeType || options.generationConfig
+            ? {
+                contents: [{ role: "user", parts: [{ text: prompt }] }],
+                generationConfig: {
+                  ...(options.responseMimeType
+                    ? { responseMimeType: options.responseMimeType }
+                    : {}),
+                  ...(options.responseSchema
+                    ? { responseSchema: options.responseSchema }
+                    : {}),
+                  ...(options.generationConfig || {}),
+                },
+              }
+            : prompt;
+
+        const result = await model.generateContent(requestPayload, {
           timeout: timeoutMs,
           signal: abortSignal,
         });

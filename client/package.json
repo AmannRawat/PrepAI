@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node tests/speechUtils.test.js && node tests/api.test.js"
+    "test": "node tests/speechUtils.test.js && node tests/api.test.js && node tests/codeFormatter.test.js"
   },
   "dependencies": {
     "@clerk/react": "^6.17.8",

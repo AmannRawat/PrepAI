@@ -394,12 +394,194 @@ export function hasComplexityMismatch(referenceSolution) {
 }
 
 /**
- * Deterministically checks that the problem's JavaScript reference solution
- * executes without runtime errors and produces the exact expectedOutput for every test case.
- * Runs locally inside an isolated node:vm sandbox with a strict execution deadline (150ms per case).
- * Completely offline, requiring NO external compiler calls or network dependencies.
+ * Determines whether a problem contract explicitly allows unordered/arbitrary output.
  */
-export function verifyReferenceSolutionMatchesTestCases(problem) {
+export function isUnorderedContract(description = "", title = "") {
+  const text = `${title} ${description}`;
+  const allowUnordered =
+    /\b(in any order|in either order|order does not matter|in any sequence|in arbitrary order|any order is accepted|return the (?:elements|pairs|indices|items|values|result) in any order)\b/i.test(
+      text
+    );
+  const requireOrder =
+    /\b(in ascending order|in descending order|in sorted order|sorted by|in order of appearance|non-decreasing order|non-increasing order)\b/i.test(
+      text
+    );
+  return allowUnordered && !requireOrder;
+}
+
+/**
+ * Compares two arrays in an order-independent fashion when allowed by the problem contract.
+ */
+export function unorderedValuesEqual(actual, expected) {
+  if (!Array.isArray(actual) || !Array.isArray(expected)) return false;
+  if (actual.length !== expected.length) return false;
+
+  const isPrimitiveArray = (arr) => arr.every((x) => x === null || typeof x !== "object");
+  if (isPrimitiveArray(actual) && isPrimitiveArray(expected)) {
+    const sortedActual = [...actual].sort((a, b) =>
+      String(a).localeCompare(String(b), undefined, { numeric: true })
+    );
+    const sortedExpected = [...expected].sort((a, b) =>
+      String(a).localeCompare(String(b), undefined, { numeric: true })
+    );
+    return JSON.stringify(sortedActual) === JSON.stringify(sortedExpected);
+  }
+
+  const normalizeAndStringify = (item) => {
+    if (Array.isArray(item)) {
+      if (isPrimitiveArray(item)) {
+        return JSON.stringify(
+          [...item].sort((a, b) =>
+            String(a).localeCompare(String(b), undefined, { numeric: true })
+          )
+        );
+      }
+      return JSON.stringify(item.map(normalizeAndStringify).sort());
+    }
+    if (item && typeof item === "object") {
+      return JSON.stringify(
+        Object.fromEntries(
+          Object.keys(item)
+            .sort()
+            .map((k) => [k, item[k]])
+        )
+      );
+    }
+    return JSON.stringify(item);
+  };
+
+  const normActual = actual.map(normalizeAndStringify).sort();
+  const normExpected = expected.map(normalizeAndStringify).sort();
+  return JSON.stringify(normActual) === JSON.stringify(normExpected);
+}
+
+/**
+ * Extracts the primary algorithmic function name from code, prioritizing
+ * the name declared in the starter boilerplate so helper functions (e.g. swap, gcd)
+ * are not mistakenly invoked as the entry point.
+ */
+export function extractPrimaryFunctionName(code, boilerplate = "") {
+  if (!code || typeof code !== "string") return null;
+
+  if (boilerplate && typeof boilerplate === "string") {
+    const bpMatch = boilerplate.match(
+      /(?:function\s+([A-Za-z0-9_$]+)|(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=\s*(?:function|\((?:[^)]*)\)\s*=>))/
+    );
+    const expectedName = bpMatch ? bpMatch[1] || bpMatch[2] : null;
+    if (expectedName) {
+      const nameRegex = new RegExp(
+        `(?:function\\s+${expectedName}\\s*\\(|(?:const|let|var)\\s+${expectedName}\\s*=\\s*(?:function|\\([^)]*\\)\\s*=>))`
+      );
+      if (nameRegex.test(code)) {
+        return expectedName;
+      }
+    }
+  }
+
+  const allFunctionMatches = [
+    ...code.matchAll(
+      /(?:function\s+([A-Za-z0-9_$]+)\s*\(([^)]*)\)|(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=\s*(?:function|\(([^)]*)\)\s*=>))/g
+    ),
+  ];
+
+  if (allFunctionMatches.length === 0) return null;
+
+  const helperNames = new Set([
+    "swap",
+    "helper",
+    "dfs",
+    "bfs",
+    "gcd",
+    "lcm",
+    "partition",
+    "merge",
+    "check",
+    "isvalid",
+  ]);
+  const primary = allFunctionMatches.find((m) => {
+    const name = m[1] || m[3];
+    return name && !helperNames.has(name.toLowerCase());
+  });
+
+  if (primary) {
+    return primary[1] || primary[3];
+  }
+
+  return allFunctionMatches[0][1] || allFunctionMatches[0][3];
+}
+
+/**
+ * Extracts parameter names from the declared primary function signature.
+ */
+export function extractParameterNames(code, fnName) {
+  if (!code || !fnName) return [];
+  const regex = new RegExp(
+    `(?:function\\s+${fnName}\\s*\\(([^)]*)\\)|(?:const|let|var)\\s+${fnName}\\s*=\\s*(?:function\\s*\\(([^)]*)\\)|\\(([^)]*)\\)\\s*=>))`
+  );
+  const match = code.match(regex);
+  if (!match) return [];
+  const rawParams = match[1] || match[2] || match[3] || "";
+  return rawParams
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Robustly maps testcase input dictionary to positional arguments matching paramNames.
+ * Handles exact matches, case differences, and camelCase vs snake_case conventions.
+ */
+export function mapArgumentsToParameters(inputObj, paramNames) {
+  if (!inputObj || typeof inputObj !== "object") return [];
+  if (!paramNames || paramNames.length === 0) return Object.values(inputObj);
+
+  const inputKeys = Object.keys(inputObj);
+
+  if (paramNames.every((p) => Object.prototype.hasOwnProperty.call(inputObj, p))) {
+    return paramNames.map((p) => inputObj[p]);
+  }
+
+  const normalizedKeyMap = new Map();
+  for (const k of inputKeys) {
+    normalizedKeyMap.set(k.toLowerCase(), k);
+    normalizedKeyMap.set(k.replace(/[^a-zA-Z0-9]/g, "").toLowerCase(), k);
+  }
+
+  const mappedArgs = [];
+  let allMapped = true;
+
+  for (const p of paramNames) {
+    if (Object.prototype.hasOwnProperty.call(inputObj, p)) {
+      mappedArgs.push(inputObj[p]);
+      continue;
+    }
+    const lower = normalizedKeyMap.get(p.toLowerCase());
+    if (lower) {
+      mappedArgs.push(inputObj[lower]);
+      continue;
+    }
+    const clean = normalizedKeyMap.get(p.replace(/[^a-zA-Z0-9]/g, "").toLowerCase());
+    if (clean) {
+      mappedArgs.push(inputObj[clean]);
+      continue;
+    }
+    allMapped = false;
+    break;
+  }
+
+  if (allMapped && mappedArgs.length === paramNames.length) {
+    return mappedArgs;
+  }
+
+  return Object.values(inputObj);
+}
+
+/**
+ * Evaluates the problem's JavaScript reference solution against 100% of generated test cases.
+ * Returns a comprehensive diagnostic report containing pass/fail state, compilation errors,
+ * and individual test case mismatch details (input, expected, actual, failure reason).
+ */
+export function evaluateProblemConsistency(problem) {
   if (
     !problem ||
     typeof problem !== "object" ||
@@ -409,30 +591,39 @@ export function verifyReferenceSolutionMatchesTestCases(problem) {
     !Array.isArray(problem.testCases) ||
     problem.testCases.length === 0
   ) {
-    return false;
+    return {
+      isValid: false,
+      compilationError: null,
+      failingCases: [],
+      summary: "Missing reference solution or test cases",
+    };
   }
 
   const code = problem.referenceSolution.code;
-
-  // Extract primary function name and parameters
-  const fnMatch = code.match(/function\s+([A-Za-z0-9_$]+)\s*\(([^)]*)\)/);
-  let fnName = "";
-  let paramNames = [];
-
-  if (fnMatch) {
-    fnName = fnMatch[1];
-    paramNames = fnMatch[2].split(",").map((s) => s.trim()).filter(Boolean);
-  } else {
-    const arrowMatch = code.match(/(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=\s*(?:function|\(([^)]*)\)\s*=>)/);
-    if (arrowMatch) {
-      fnName = arrowMatch[1];
-      paramNames = (arrowMatch[2] || "").split(",").map((s) => s.trim()).filter(Boolean);
-    }
-  }
+  const jsBoilerplate = problem.boilerplates?.javascript || "";
+  const fnName = extractPrimaryFunctionName(code, jsBoilerplate);
 
   if (!fnName) {
-    return false;
+    return {
+      isValid: false,
+      compilationError: null,
+      failingCases: [],
+      summary: "Could not find a valid primary function name in reference solution",
+    };
   }
+
+  const FORBIDDEN_EXECUTION_TOKENS =
+    /\b(process|child_process|fs|require|import|globalThis|global)\b|constructor\s*\[\s*['"`]constructor['"`]\s*\]/;
+  if (FORBIDDEN_EXECUTION_TOKENS.test(code)) {
+    return {
+      isValid: false,
+      compilationError: "Security violation: forbidden execution tokens detected in solution code",
+      failingCases: [],
+      summary: "Security violation: forbidden execution tokens detected",
+    };
+  }
+
+  const paramNames = extractParameterNames(code, fnName);
 
   let script;
   try {
@@ -443,47 +634,273 @@ export function verifyReferenceSolutionMatchesTestCases(problem) {
       })()
     `);
   } catch (err) {
-    console.warn("[Problem Consistency Gate] Reference solution compilation error:", err.message);
-    return false;
+    return {
+      isValid: false,
+      compilationError: err.message,
+      failingCases: [],
+      summary: `Reference solution compilation error: ${err.message}`,
+    };
   }
+
+  const allowUnordered = isUnorderedContract(problem.description, problem.title);
+  const failingCases = [];
 
   for (let i = 0; i < problem.testCases.length; i++) {
     const tc = problem.testCases[i];
     if (!tc || typeof tc !== "object" || !tc.input || typeof tc.input !== "object") {
-      return false;
+      failingCases.push({
+        testCaseIndex: i,
+        input: tc?.input,
+        expectedOutput: tc?.expectedOutput,
+        actualOutput: null,
+        reason: "Test case is malformed or missing input object",
+      });
+      continue;
     }
 
-    const inputObj = tc.input;
-    const args =
-      paramNames.length > 0 && paramNames.every((p) => Object.prototype.hasOwnProperty.call(inputObj, p))
-        ? paramNames.map((p) => inputObj[p])
-        : Object.values(inputObj);
+    const args = mapArgumentsToParameters(tc.input, paramNames);
 
     try {
-      const sandbox = {
+      const sandbox = Object.assign(Object.create(null), {
+        Math,
+        Number,
+        String,
+        Array,
+        Boolean,
+        Object,
+        Set,
+        Map,
+        RegExp,
+        parseInt,
+        parseFloat,
+        isNaN,
+        isFinite,
+        JSON,
+        console: Object.freeze({ log: () => {}, warn: () => {}, error: () => {} }),
         __args: JSON.parse(JSON.stringify(args)),
-        console: { log: () => {}, warn: () => {}, error: () => {} },
-      };
-      const actual = script.runInNewContext(sandbox, { timeout: 150 });
+      });
+      const actual = script.runInNewContext(sandbox, { timeout: 250 });
 
-      if (!valuesEqual(actual, tc.expectedOutput)) {
-        console.warn(
-          `[Problem Consistency Gate] Reference solution mismatch on testCase ${i}: expected ${JSON.stringify(
-            tc.expectedOutput
-          )}, got ${JSON.stringify(actual)}`
-        );
-        return false;
+      if (actual === undefined && tc.expectedOutput !== undefined) {
+        failingCases.push({
+          testCaseIndex: i,
+          input: tc.input,
+          expectedOutput: tc.expectedOutput,
+          actualOutput: undefined,
+          reason: `Reference solution returned undefined (expected ${JSON.stringify(tc.expectedOutput)})`,
+        });
+        continue;
+      }
+
+      let matches = valuesEqual(actual, tc.expectedOutput, { strictTypes: true });
+
+      if (!matches && allowUnordered) {
+        if (unorderedValuesEqual(actual, tc.expectedOutput)) {
+          matches = true;
+        }
+      }
+
+      if (!matches) {
+        failingCases.push({
+          testCaseIndex: i,
+          input: tc.input,
+          expectedOutput: tc.expectedOutput,
+          actualOutput: actual,
+          reason: `Expected ${JSON.stringify(tc.expectedOutput)}, got ${JSON.stringify(actual)}`,
+        });
       }
     } catch (execErr) {
-      console.warn(
-        `[Problem Consistency Gate] Reference solution runtime error on testCase ${i}:`,
-        execErr.message
-      );
-      return false;
+      failingCases.push({
+        testCaseIndex: i,
+        input: tc.input,
+        expectedOutput: tc.expectedOutput,
+        actualOutput: null,
+        reason: `Runtime error during execution: ${execErr.message}`,
+      });
     }
   }
 
+  const isValid = failingCases.length === 0;
+  return {
+    isValid,
+    compilationError: null,
+    failingCases,
+    summary: isValid
+      ? "Passed all test cases"
+      : `Reference solution mismatch on ${failingCases.length} testcase(s): ${failingCases[0]?.reason}`,
+  };
+}
+
+/**
+ * Deterministically checks that the problem's JavaScript reference solution
+ * executes without runtime errors and produces the exact expectedOutput for every test case.
+ * Runs locally inside an isolated node:vm sandbox.
+ */
+export function verifyReferenceSolutionMatchesTestCases(problem) {
+  const report = evaluateProblemConsistency(problem);
+  if (!report.isValid) {
+    if (report.compilationError) {
+      console.warn(
+        "[Problem Consistency Gate] Reference solution compilation error:",
+        report.compilationError
+      );
+    } else if (report.failingCases.length > 0) {
+      const first = report.failingCases[0];
+      console.warn(
+        `[Problem Consistency Gate] Reference solution mismatch on testCase ${first.testCaseIndex}: ${first.reason}`
+      );
+    }
+    return false;
+  }
   return true;
+}
+
+/**
+ * Performs a targeted diagnostic repair of an invalid DSA problem candidate.
+ * Supplies Gemini with the failing test cases, inputs, expected outputs, and actual outputs,
+ * requesting an accurate fix of either the reference solution code or the test case expected outputs.
+ */
+/**
+ * Merges a constrained repair patch or full problem update into the original candidate.
+ * Returns a complete candidate problem for independent schema and consistency revalidation.
+ */
+export function applyRepairPatch(candidate, patch) {
+  if (!candidate || typeof candidate !== "object") return null;
+  if (!patch || typeof patch !== "object") return candidate;
+
+  // If the model returned a complete problem object (legacy / full schema)
+  if (
+    typeof patch.title === "string" &&
+    patch.boilerplates &&
+    Array.isArray(patch.testCases)
+  ) {
+    return patch;
+  }
+
+  // Clone candidate to avoid mutating original in place
+  const repaired = JSON.parse(JSON.stringify(candidate));
+
+  // 1. Update reference solution code if provided
+  if (typeof patch.referenceSolutionCode === "string" && patch.referenceSolutionCode.trim()) {
+    if (!repaired.referenceSolution) repaired.referenceSolution = {};
+    repaired.referenceSolution.code = patch.referenceSolutionCode.trim();
+  } else if (
+    patch.referenceSolution &&
+    typeof patch.referenceSolution.code === "string" &&
+    patch.referenceSolution.code.trim()
+  ) {
+    if (!repaired.referenceSolution) repaired.referenceSolution = {};
+    repaired.referenceSolution.code = patch.referenceSolution.code.trim();
+  }
+
+  // 2. Update expected outputs for failing test cases if provided
+  if (Array.isArray(patch.correctedOutputs) && Array.isArray(repaired.testCases)) {
+    for (const item of patch.correctedOutputs) {
+      if (
+        item &&
+        typeof item.testCaseIndex === "number" &&
+        item.testCaseIndex >= 0 &&
+        item.testCaseIndex < repaired.testCases.length &&
+        Object.prototype.hasOwnProperty.call(item, "expectedOutput")
+      ) {
+        repaired.testCases[item.testCaseIndex].expectedOutput = item.expectedOutput;
+      }
+    }
+  }
+
+  // 3. Optional description update (e.g. adding unordered return clarification)
+  if (typeof patch.descriptionUpdate === "string" && patch.descriptionUpdate.trim()) {
+    repaired.description = patch.descriptionUpdate.trim();
+  }
+
+  // 4. Optional JavaScript boilerplate update if signature changed
+  if (
+    patch.boilerplates?.javascript &&
+    typeof patch.boilerplates.javascript === "string"
+  ) {
+    if (!repaired.boilerplates) repaired.boilerplates = {};
+    repaired.boilerplates.javascript = patch.boilerplates.javascript;
+  }
+
+  return repaired;
+}
+
+/**
+ * Performs a targeted diagnostic repair of an invalid DSA problem candidate.
+ * Supplies Gemini with the failing test cases, inputs, expected outputs, and actual outputs,
+ * requesting a constrained, low-complexity repair patch (either reference solution fix,
+ * corrected expectedOutputs, or both). Merges the patch and returns the complete candidate.
+ */
+export async function repairDsaProblem({
+  candidate,
+  consistencyReport,
+  normalizedTopic,
+  matchedDifficulty,
+}) {
+  const failingDetails = (consistencyReport.failingCases || [])
+    .slice(0, 5)
+    .map(
+      (fc) =>
+        `- Test Case ${fc.testCaseIndex}:
+   Input: ${JSON.stringify(fc.input)}
+   Claimed expectedOutput: ${JSON.stringify(fc.expectedOutput)}
+   Actual reference solution output: ${JSON.stringify(fc.actualOutput)}
+   Reason: ${fc.reason}`
+    )
+    .join("\n");
+
+  const repairPrompt = `You are a principal algorithmic problem setter and verifier for an interview coding platform.
+A generated DSA problem failed automated correctness validation because the reference solution contradicts the test cases.
+
+PROBLEM TITLE: ${candidate.title || "Untitled"}
+TOPIC: ${normalizedTopic}
+DIFFICULTY: ${matchedDifficulty}
+
+PROBLEM DESCRIPTION:
+${candidate.description || ""}
+
+FUNCTION SIGNATURE (JavaScript):
+${candidate.boilerplates?.javascript || ""}
+
+CURRENT JAVASCRIPT REFERENCE SOLUTION:
+${candidate.referenceSolution?.code || ""}
+
+VALIDATION FAILURE REPORT:
+${consistencyReport.compilationError ? `Compilation Error: ${consistencyReport.compilationError}\n` : ""}${failingDetails}
+
+REPAIR INSTRUCTIONS:
+1. DIAGNOSE THE ROOT CAUSE:
+   - Determine whether the reference solution has a bug, or the test cases have incorrect expected outputs, or both.
+2. PROVIDE A CONSTRAINED REPAIR PATCH:
+   - Return a JSON object with ONLY the necessary corrections.
+   - If the reference solution is buggy, provide the complete, working "referenceSolutionCode".
+   - If test cases have wrong expected outputs, provide "correctedOutputs" with the testCaseIndex and true expectedOutput.
+   - You do NOT need to repeat unchanged boilerplates or valid test cases.
+
+REQUIRED JSON PATCH SCHEMA:
+{
+  "diagnosis": "Concise explanation of the bug and fix",
+  "patchType": "code" | "testCases" | "both",
+  "referenceSolutionCode": "function primaryFn(...) { ... }", // include if reference solution was fixed
+  "correctedOutputs": [ // include if test cases were fixed
+    {
+      "testCaseIndex": 0,
+      "expectedOutput": 0
+    }
+  ]
+}
+
+Return ONLY this valid JSON object without surrounding commentary.`;
+
+  const repairResponse = await generateText(repairPrompt, {
+    stage: "problem_repair",
+    timeout: 35000,
+    maxAttempts: 2,
+    responseMimeType: "application/json",
+  });
+
+  const patch = extractJson(repairResponse);
+  return applyRepairPatch(candidate, patch);
 }
 
 export async function createDsaProblem({
@@ -493,6 +910,7 @@ export async function createDsaProblem({
   allowFallback = false,
   recentTitles = [],
   recentBlueprints = [],
+  recentTopics = [],
 }) {
   const allowedDifficulties = ["Easy", "Medium", "Hard"];
   const matchedDifficulty =
@@ -671,18 +1089,59 @@ FINAL SELF-CHECK:
     try {
       const responseText = await generateText(prompt, {
         stage: "problem_generation",
-        timeout: 25000,
-        maxAttempts: 1,
+        timeout: 45000,
+        maxAttempts: 2,
+        responseMimeType: "application/json",
       });
-      const parsed = extractJson(responseText);
+      let parsed = extractJson(responseText);
 
       if (!validateGeneratedProblem(parsed)) {
         throw new Error("Generated problem failed structural validation.");
       }
 
-      if (!verifyReferenceSolutionMatchesTestCases(parsed)) {
+      let consistency = evaluateProblemConsistency(parsed);
+
+      if (!consistency.isValid) {
+        console.warn(
+          `[Problem Consistency Gate] Attempt ${attempt}: Candidate consistency check failed (${consistency.summary}). Initiating diagnostic repair...`
+        );
+        try {
+          const repaired = await repairDsaProblem({
+            candidate: parsed,
+            consistencyReport: consistency,
+            normalizedTopic,
+            matchedDifficulty,
+          });
+
+          if (validateGeneratedProblem(repaired)) {
+            const repairedConsistency = evaluateProblemConsistency(repaired);
+            if (repairedConsistency.isValid) {
+              console.log(
+                `[Problem Consistency Gate] Attempt ${attempt}: Diagnostic repair successful!`
+              );
+              parsed = repaired;
+              consistency = repairedConsistency;
+            } else {
+              console.warn(
+                `[Problem Consistency Gate] Attempt ${attempt}: Diagnostic repair still inconsistent (${repairedConsistency.summary}).`
+              );
+            }
+          } else {
+            console.warn(
+              `[Problem Consistency Gate] Attempt ${attempt}: Repaired problem failed structural validation.`
+            );
+          }
+        } catch (repairErr) {
+          console.warn(
+            `[Problem Consistency Gate] Attempt ${attempt}: Diagnostic repair encountered error:`,
+            repairErr.message
+          );
+        }
+      }
+
+      if (!consistency.isValid) {
         throw new Error(
-          "Generated problem failed consistency validation (reference solution contradicts test cases)."
+          `Generated problem failed consistency validation (${consistency.summary}).`
         );
       }
 
@@ -711,11 +1170,13 @@ FINAL SELF-CHECK:
       lastError = err;
       console.warn(`Problem generation attempt ${attempt} failed:`, err.message);
 
-      const isTransport =
-        err.name === "AbortError" ||
-        err.name === "TimeoutError" ||
-        /fetch failed|aborted|ETIMEDOUT|ECONNRESET/i.test(err.message || "");
-      if (isTransport) {
+      // Only break immediately if the error is permanent (e.g. invalid API key or bad auth).
+      // Transient transport/timeout errors should allow attempt 2 to execute.
+      const isPermanent =
+        /API key not valid|PERMISSION_DENIED|INVALID_ARGUMENT|unregistered project/i.test(
+          err.message || ""
+        );
+      if (isPermanent) {
         break;
       }
     }
@@ -723,7 +1184,7 @@ FINAL SELF-CHECK:
 
   if (!problem) {
     if (allowFallback) {
-      if (!isTopicSupported(normalizedTopic)) {
+      if (!isGeneric && !isTopicSupported(normalizedTopic)) {
         const available = getAvailableTopics().join(", ");
         throw new Error(
           `Practice problems for topic "${normalizedTopic}" are not available in our library. Available topics: ${available}.`
@@ -732,10 +1193,11 @@ FINAL SELF-CHECK:
 
       try {
         const blueprint = selectNextBlueprint({
-          requestedTopic: normalizedTopic,
+          requestedTopic: isGeneric ? "Any" : normalizedTopic,
           requestedDifficulty: matchedDifficulty,
           excludeTitles: [trimmedExclude, ...recentTitles].filter(Boolean),
           recentBlueprintIds: recentBlueprints,
+          recentTopics,
         });
 
         if (blueprint) {
@@ -746,6 +1208,8 @@ FINAL SELF-CHECK:
           const clientSafeProblem = sanitizeProblemForClient(canonicalProblem);
           clientSafeProblem.difficulty = blueprint.difficulty;
           clientSafeProblem.topic = blueprint.topic;
+          clientSafeProblem.isFallback = true;
+          clientSafeProblem.fallbackReason = lastError?.message || "Verified blueprint fallback loaded";
           if (canonicalProblem.referenceSolution) {
             clientSafeProblem.referenceSolution = canonicalProblem.referenceSolution;
           }
@@ -776,6 +1240,7 @@ FINAL SELF-CHECK:
   const clientSafeProblem = sanitizeProblemForClient(problem);
   clientSafeProblem.difficulty = matchedDifficulty;
   clientSafeProblem.topic = normalizedTopic;
+  clientSafeProblem.isFallback = false;
   if (problem.referenceSolution) {
     clientSafeProblem.referenceSolution = problem.referenceSolution;
   }
@@ -836,6 +1301,7 @@ export async function generateProblem(req, res) {
       allowFallback: true,
       recentTitles: combinedRecentTitles,
       recentBlueprints: userHistory.recentBlueprints,
+      recentTopics: userHistory.recentTopics,
     });
 
     recordUserProblemLoad(req.user.id, {
@@ -843,6 +1309,11 @@ export async function generateProblem(req, res) {
       topic: result.topic,
       title: result.problem.title,
     });
+
+    result.problem.isFallback = Boolean(result.isFallback);
+    if (result.fallbackReason) {
+      result.problem.fallbackReason = result.fallbackReason;
+    }
 
     return res.status(200).json(result.problem);
   } catch (error) {

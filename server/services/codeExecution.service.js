@@ -31,12 +31,16 @@ function normalizeValue(value) {
 /**
  * Compares actual and expected outputs, ignoring object key ordering.
  */
-export function valuesEqual(actual, expected) {
+export function valuesEqual(actual, expected, { strictTypes = false } = {}) {
     if (
         JSON.stringify(normalizeValue(actual)) ===
         JSON.stringify(normalizeValue(expected))
     ) {
         return true;
+    }
+
+    if (strictTypes) {
+        return false;
     }
 
     // Coerce numeric / boolean / JSON string representation in expectedOutput
