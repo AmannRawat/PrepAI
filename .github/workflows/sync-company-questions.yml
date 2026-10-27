@@ -1,0 +1,58 @@
+name: Weekly Company Questions Catalog Sync
+
+on:
+  schedule:
+    # Run every Sunday at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Perform dry run (validate CSVs without database writes)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  sync-catalog:
+    name: Sync Company Question Catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'server/package.json'
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Verify MongoDB URI secret is configured
+        if: ${{ !(github.event.inputs.dry_run == 'true' || github.event.inputs.dry_run == true) }}
+        run: |
+          if [ -z "${{ secrets.MONGODB_URI }}" ]; then
+            echo "::error::Secret MONGODB_URI is not configured in repository Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Run company questions sync script
+        working-directory: server
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "Running sync in DRY-RUN mode..."
+            node scripts/syncCompanyQuestions.js --dry-run
+          else
+            echo "Running production catalog sync..."
+            node scripts/syncCompanyQuestions.js
+          fi

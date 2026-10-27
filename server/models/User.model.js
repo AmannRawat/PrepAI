@@ -1,5 +1,5 @@
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
 // This is the blueprint/schema for our User data
 const userSchema = new mongoose.Schema({
@@ -15,45 +15,69 @@ const userSchema = new mongoose.Schema({
         lowercase: true, // Store email in lowercase
         trim: true // Remove any extra whitespace
     },
+    clerkUserId: {
+        type: String,
+        unique: true,
+        sparse: true
+        // Links the MongoDB user to their Clerk identity.
+        // Existing users can keep this field unset until they sign in through Clerk.
+    },
     password: {
         type: String,
-        required: [true, "Password is required"],
+        // Password is optional because Clerk manages authentication.
+        // Existing users with passwords can continue using their stored password hashes.
         minlength: [6, "Password must be at least 6 characters long"]
     },
     currentStreak: {
         type: Number,
-        default: 10 // Start all users at 0
+        default: 0 // Start all users at 0
     },
     lastActivityDate: {
         type: Date
+    },
+    resumeDocumentId: {
+        type: String,
+        default: null
+    },
+    careerPreferences: {
+        targetRole: { type: String, default: null },
+        targetCompany: { type: String, default: null },
+        experienceLevel: { type: String, default: null },
+        yearsOfExperience: { type: String, default: null },
+        defaultLanguage: { type: String, default: 'javascript' },
+        preferredVoice: { type: String, default: '' },
+        preferredResumeId: { type: String, default: null },
     }
 }, {
     // Adds 'createdAt' and 'updatedAt' timestamps automatically
-    timestamps: true 
+    timestamps: true
 });
 
-//  Password Hashing Middleware
-// This function runs automatically *before* a new user is saved
-userSchema.pre('save', async function(next) {
-    // 'this' refers to the user document about to be saved
-    
-    // We only hash the password if it's new or has been modified
-    if (!this.isModified('password')) {
+// Password Hashing Middleware
+// This function runs automatically before a user is saved.
+userSchema.pre('save', async function (next) {
+    // 'this' refers to the user document about to be saved.
+
+    // Clerk-managed users don't need a local password.
+    // Existing passwords are hashed only when newly added or modified.
+    if (!this.password || !this.isModified('password')) {
         return next();
     }
 
     try {
-        // Generate a "salt" (a random string to make the hash secure)
+        // Generate a salt (a random string to make the hash secure).
         const salt = await bcrypt.genSalt(10);
-        // Hash the password with the salt and update the user's password field
+
+        // Hash the password with the salt and update the user's password field.
         this.password = await bcrypt.hash(this.password, salt);
+
         next();
     } catch (error) {
         next(error);
     }
 });
 
-// This creates the 'User' model (which will use the 'users' collection in MongoDB)
+// This creates the 'User' model (which will use the 'users' collection in MongoDB).
 const User = mongoose.model('User', userSchema);
 
-module.exports = User;
+export default User;

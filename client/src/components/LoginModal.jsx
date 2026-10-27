@@ -1,29 +1,54 @@
+import { SignIn } from "@clerk/react";
 import { useModal } from "../context/ModalContext";
-import LoginForm from "./LoginForm"; 
-import { X } from "lucide-react"; 
+import { X } from "lucide-react";
+import { useEffect } from "react";
+import { useAuth } from "../context/AuthContext";
 
 const LoginModal = () => {
-  const { isLoginOpen, closeLogin } = useModal();
+    const { isLoginOpen, closeLogin } = useModal();
+    const { isLoaded, isLoggedIn } = useAuth();
 
-  if (!isLoginOpen) return null;
+    useEffect(() => {
+        if (isLoaded && isLoggedIn) {
+            closeLogin();
+        }
+    }, [isLoaded, isLoggedIn, closeLogin]);
 
-  return (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      
-      <div className="relative w-full max-w-md p-6 bg-surface rounded-2xl shadow-2xl border border-white/10">
-        
-        <button 
-          onClick={closeLogin} 
-          className="absolute top-4 right-4 text-text-secondary hover:text-text-primary transition-colors z-10"
-        >
-          <X size={24} />
-        </button>
-        
-        <LoginForm onSuccess={closeLogin} isModal={true} />
+    // If the modal is not open, don't render anything.
+    if (!isLoginOpen) {
+        return null;
+    }
 
-      </div>
-    </div>
-  );
+    return (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="relative w-full max-w-md p-4 bg-surface rounded-2xl shadow-2xl border border-white/10">
+                <button
+                    onClick={closeLogin}
+                    className="absolute top-4 right-4 text-text-secondary hover:text-text-primary transition-colors z-10"
+                    aria-label="Close login"
+                >
+                    <X size={24} />
+                </button>
+
+                <SignIn
+                    routing="hash"
+                    signUpUrl="/signup"
+                    fallbackRedirectUrl="/"
+                    appearance={{
+                        elements: {
+                            rootBox: {
+                                width: "100%",
+                            },
+                            card: {
+                                boxShadow: "none",
+                                background: "transparent",
+                            },
+                        },
+                    }}
+                />
+            </div>
+        </div>
+    );
 };
 
 export default LoginModal;

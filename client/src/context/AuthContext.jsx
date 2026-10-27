@@ -1,59 +1,81 @@
-import { createContext, useContext, useState } from 'react';
-// import { useNavigate } from 'react-router-dom';
+import { createContext, useContext, useEffect } from "react";
+import { useAuth as useClerkAuth, useUser, useClerk } from "@clerk/react";
+import { identifyUser, resetUser } from "../utils/analytics.js";
+import { clearApiCache } from "../utils/api.js";
 
-// Context
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
-// AuthProvider component
 export const AuthProvider = ({ children }) => {
-    // Initialize state by reading from localStorage
-    // This makes sure we stay logged in even after a page refresh
-    const [token, setToken] = useState(localStorage.getItem('token'));
-    const [userEmail, setUserEmail] = useState(localStorage.getItem('userEmail'));
-    const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('token'));
-    const [userName, setUserName] = useState(localStorage.getItem('userName'));
-    // const navigate = useNavigate();
+    const {
+        isLoaded: authLoaded,
+        isSignedIn,
+        getToken,
+    } = useClerkAuth();
 
-    // Login function
-    const login = (data) => {
-        // Saves data to localStorage
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('userEmail', data.email);
-        localStorage.setItem('userName', data.name);
-        // Update the state
-        setToken(data.token);
-        setUserEmail(data.email);
-        setUserName(data.name);
-        setIsLoggedIn(true);
+    const {
+        isLoaded: userLoaded,
+        user,
+    } = useUser();
 
-        // Redirect to the dashboard
-        // navigate('/'); // Navigation will be handled by the component that calls this
-    };
-    // Logout function
-    const logout = () => {
-        // Clear data from localStorage
-        localStorage.removeItem('token');
-        localStorage.removeItem('userEmail');
-        localStorage.removeItem('userName');
+    const clerk = useClerk();
 
-        // Reset the state
-        setToken(null);
-        setUserEmail(null);
-        setUserName(null);
-        setIsLoggedIn(false);
+    const isLoaded = authLoaded && userLoaded;
 
-        // Redirects to the login page
-        // navigate('/login'); // Navigation will be handled by the component that calls this
+    useEffect(() => {
+        if (!isLoaded) return;
+
+        if (isSignedIn && user?.id) {
+            identifyUser(user.id);
+        } else if (!isSignedIn) {
+            resetUser();
+            clearApiCache();
+        }
+    }, [isLoaded, isSignedIn, user?.id]);
+
+    const login = async () => {
+        return getToken();
     };
 
-    // Pass the values to all children
+    const logout = async () => {
+        resetUser();
+        clearApiCache();
+        await clerk.signOut();
+    };
+
+    const openUserProfile = () => {
+        if (typeof clerk?.openUserProfile === 'function') {
+            clerk.openUserProfile();
+        }
+    };
+
+    // Do not render the application until Clerk has finished
+    // determining the current authentication state.
+    //
+    // Without this guard, the application can briefly render
+    // the logged-out UI before Clerk finishes loading and then
+    // switch to the logged-in UI.
+    if (!isLoaded) {
+        return (
+            <div className="min-h-screen bg-background text-text-primary flex items-center justify-center">
+                <div className="text-sm text-text-secondary">
+                    Loading PrepAI...
+                </div>
+            </div>
+        );
+    }
+
     const value = {
-        isLoggedIn,
-        token,
-        userEmail,
-        userName,
+        isLoaded,
+        isLoggedIn: Boolean(isSignedIn),
+        token: null,
+        userEmail: user?.primaryEmailAddress?.emailAddress || null,
+        userName: user?.fullName || user?.firstName || null,
+        userImageUrl: user?.imageUrl || null,
+        userId: user?.id || null,
+        openUserProfile,
         login,
-        logout
+        logout,
+        getToken,
     };
 
     return (
@@ -63,7 +85,4 @@ export const AuthProvider = ({ children }) => {
     );
 };
 
-// Custom hook to use the context
-export const useAuth = () => {
-    return useContext(AuthContext);
-};
+export const useAuth = () => useContext(AuthContext);

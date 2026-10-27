@@ -1,53 +1,150 @@
-// import React from 'react';  NO NEED IN VITE new version React
-import { Outlet, Navigate, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { LogIn } from 'lucide-react';
 import Sidebar from './Sidebar';
 import ThemeToggle from './ThemeToggle';
 import StreakCounter from './StreakCounter';
 import MobileNav from './MobileNav';
 import LoginModal from './LoginModal';
-// import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
+import { useModal } from '../context/ModalContext';
+import { useTheme } from '../context/ThemeContext';
 import { motion, AnimatePresence } from 'framer-motion';
+import { trackEvent, ALLOWED_EVENTS } from '../utils/analytics.js';
+
+const ROUTE_FEATURE_MAP = {
+  '/': 'dashboard',
+  '/dsa-arena': 'dsa_arena',
+  '/behavioral-coach': 'behavioral_coach',
+  '/resume-reviewer': 'resume_reviewer',
+  '/progress': 'progress_profile',
+  '/profile': 'progress_profile',
+  '/calendar': 'calendar',
+  '/settings': 'settings',
+};
 
 const Layout = () => {
-  // const { isLoggedIn } = useAuth(); //Get the user's login status from context
   const location = useLocation();
-  // Check if the user is logged in
-  // if (!isLoggedIn) {
-  //   // If not logged in, redirect them to the /login page
-  //   return <Navigate to="/login" replace />;
-  // }
+  const navigate = useNavigate();
+  const { userName, userImageUrl, isLoggedIn, isLoaded } = useAuth();
+  const { openLogin } = useModal();
+  const { dashboardBg, isBgLoading, theme } = useTheme();
 
-  //  show the layout with sidebar and main content
+  useEffect(() => {
+    const featureName = ROUTE_FEATURE_MAP[location.pathname];
+    if (featureName) {
+      trackEvent(ALLOWED_EVENTS.FEATURE_OPENED, { feature_name: featureName });
+    }
+  }, [location.pathname]);
+
+  const userInitial = userName ? userName.charAt(0).toUpperCase() : null;
+
+  const isDashboard = location.pathname === '/';
+  const isLight = theme === 'light';
+
   return (
-    <div className="flex h-screen bg-background text-text-primary font-sans">
-      {/* Persistent sidebar */}
+    <div className="flex h-screen bg-background text-text-primary font-sans overflow-hidden">
+      {/* Persistent left sidebar */}
       <Sidebar />
 
-      {/* The main content area that will change based on the route */}
-      <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto relative">
-        <div className="flex justify-end gap-4 mb-4 md:mb-0 md:absolute md:top-6 md:right-8 z-20">
-          <StreakCounter />
+      {/* Main viewport */}
+      <main className="flex flex-col flex-1 h-screen overflow-y-auto relative">
+        {/* Shared mountain landscape background layer for Dashboard - extends to very top behind header */}
+        {isDashboard && (
+          <div
+            className="absolute top-0 left-0 right-0 h-[960px] sm:h-[840px] lg:h-[740px] pointer-events-none z-0 overflow-hidden transition-opacity duration-300"
+            style={{
+              opacity: isBgLoading ? 0 : 1,
+              backgroundImage: isLight
+                ? `linear-gradient(to bottom, rgba(243, 244, 241, 0.68) 0%, rgba(243, 244, 241, 0.60) 25%, rgba(243, 244, 241, 0.82) 55%, rgba(243, 244, 241, 0.95) 80%, var(--color-background) 100%), url("${dashboardBg || '/backgrounds/bg-lake-morning.jpg'}")`
+                : `linear-gradient(to bottom, rgba(9, 11, 14, 0.04) 0%, rgba(9, 11, 14, 0.02) 20%, rgba(9, 11, 14, 0.2) 50%, rgba(9, 11, 14, 0.72) 80%, var(--color-background) 100%), url("${dashboardBg || '/backgrounds/bg-lake-morning.jpg'}")`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center top',
+              backgroundRepeat: 'no-repeat',
+            }}
+          />
+        )}
+
+        {/* Top-Right Header Status Bar */}
+        <header
+          className={`sticky top-0 z-30 flex items-center justify-end gap-3 px-6 py-3.5 shrink-0 transition-colors ${
+            isDashboard
+              ? 'bg-transparent border-b border-border/40 dark:border-white/5'
+              : 'bg-background/80 backdrop-blur-md border-b border-border/40'
+          }`}
+        >
+          {/* User Streak: strictly hidden when signed out or invalid */}
+          {isLoaded && isLoggedIn && <StreakCounter />}
+
+          {/* Public Control: Theme Toggle always accessible */}
           <ThemeToggle />
+
+          {/* User Avatar / Sign In Action */}
+          {!isLoaded ? (
+            <div className="w-8 h-8 rounded-full bg-surface-elevated animate-pulse shrink-0" />
+          ) : isLoggedIn ? (
+            <button
+              type="button"
+              onClick={() => navigate('/settings')}
+              className="w-8 h-8 rounded-full overflow-hidden shrink-0 shadow-sm hover:ring-2 hover:ring-emerald-400/50 transition cursor-pointer"
+              title="Account & Settings"
+              aria-label="Account Settings"
+            >
+              {userImageUrl ? (
+                <img
+                  src={userImageUrl}
+                  alt={userName || 'User'}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    if (e.currentTarget.nextElementSibling) {
+                      e.currentTarget.nextElementSibling.style.display = 'flex';
+                    }
+                  }}
+                />
+              ) : null}
+              <div
+                className={`w-full h-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white font-semibold text-xs items-center justify-center ${userImageUrl ? 'hidden' : 'flex'}`}
+              >
+                {userInitial || 'U'}
+              </div>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                if (openLogin) openLogin();
+                else navigate('/login');
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-semibold text-xs transition cursor-pointer"
+              title="Sign In"
+            >
+              <LogIn size={14} />
+              <span>Sign In</span>
+            </button>
+          )}
+        </header>
+
+        {/* Content Area with Page Transitions */}
+        <div className={`flex-1 flex flex-col relative z-10 pb-20 md:pb-0 ${isDashboard ? 'p-0 pb-20 md:pb-0' : 'p-4 sm:p-6 md:p-8 pb-24 md:pb-8'}`}>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.15 }}
+              className="flex flex-col flex-1"
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
         </div>
-        {/* Add Animation Wrapper */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={location.pathname} // This key is essential for AnimatePresence
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-            className="flex flex-col flex-1" // Ensures the page component fills the space
-          >
-            {/* Outlet is a placeholder from react-router-dom where the routed page component will be rendered */}
-            <Outlet />
-          </motion.div>
-        </AnimatePresence>
       </main>
+
       <MobileNav />
       <LoginModal />
     </div>
-
   );
 };
 

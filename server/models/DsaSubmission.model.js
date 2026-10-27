@@ -1,5 +1,5 @@
 // backend/models/DsaSubmission.model.js
-const mongoose = require('mongoose');
+import mongoose from "mongoose";
 const { Schema } = mongoose;
 
 const dsaSubmissionSchema = new Schema({
@@ -9,9 +9,30 @@ const dsaSubmissionSchema = new Schema({
         required: true
     },
     // The problem the user was given
+    problemId: {
+        type: String,
+        default: null,
+        index: true,
+    },
     problem: {
+        id: String,
         title: String,
         description: String,
+        difficulty: {
+            type: String,
+            enum: ['Easy', 'Medium', 'Hard'],
+            default: 'Medium',
+        },
+    },
+    difficulty: {
+        type: String,
+        enum: ['Easy', 'Medium', 'Hard'],
+        default: 'Medium',
+        index: true,
+    },
+    hintsUsed: {
+        type: Number,
+        default: 0,
     },
     topic: {
         type: String,
@@ -21,6 +42,24 @@ const dsaSubmissionSchema = new Schema({
     // The user's code
     language: String,
     code: String,
+
+    // Execution results
+    verdict: {
+        type: String,
+        default: null,
+    },
+    passed: {
+        type: Number,
+        default: 0,
+    },
+    total: {
+        type: Number,
+        default: 0,
+    },
+    executionTime: {
+        type: String,
+        default: null,
+    },
     
     // The AI's feedback
     feedback: {
@@ -34,4 +73,4 @@ const dsaSubmissionSchema = new Schema({
 });
 
 const DsaSubmission = mongoose.model('DsaSubmission', dsaSubmissionSchema);
-module.exports = DsaSubmission;
+export default DsaSubmission;

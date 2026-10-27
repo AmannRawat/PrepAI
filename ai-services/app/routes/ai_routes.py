@@ -1,0 +1,302 @@
+import uuid
+import time
+
+from fastapi import APIRouter, File, UploadFile, HTTPException
+from langgraph.types import Command
+
+from app.services.document_service import (
+    extract_pdf_text,
+    chunk_text,
+)
+
+from app.services.gemini import generate_text
+
+from app.services.rag_service import (
+    ingest_chunks,
+    retrieve_context,
+    generate_rag_answer,
+)
+
+from app.services.qdrant_service import (
+    VectorServiceUnavailableError,
+    VectorServiceConfigurationError,
+    VectorServiceIncompatibleError,
+)
+from app.services.interview_service import (
+    generate_interview_response,
+)
+
+from app.services.memory_service import extract_memories
+
+from app.schemas.ai_schemas import (
+    ResumeUploadResponse,
+    InterviewRequest,
+    InterviewResponse,
+    MemoryExtractionRequest,
+    MemoryExtractionResponse,
+    StartInterviewRequest,
+    InterviewAnswerRequest,
+)
+
+from app.agents.interview_graph import interview_graph
+from app.core.security import AIConcurrencyGuard
+
+
+router = APIRouter()
+
+
+@router.get("/test-gemini")
+async def test_gemini():
+    response = generate_text(
+        "Say hello from the PrepAI AI service."
+    )
+
+    return {
+        "response": response
+    }
+
+
+@router.post("/test-ingest")
+async def test_ingest():
+    return ingest_chunks(
+        chunks=[
+            "Binary search works on sorted data and has O(log n) time complexity."
+        ],
+        document_id=str(uuid.uuid4()),
+        filename="test.txt",
+    )
+
+
+@router.get("/test-retrieval")
+async def test_retrieval(query: str):
+    return {
+        "query": query,
+        "results": retrieve_context(query),
+    }
+
+
+@router.post(
+    "/upload-pdf",
+    response_model=ResumeUploadResponse,
+)
+async def upload_pdf(
+    file: UploadFile = File(...),
+):
+    async with AIConcurrencyGuard():
+        file_bytes = await file.read()
+
+        text = extract_pdf_text(file_bytes)
+
+        chunks = chunk_text(text)
+
+        document_id = str(uuid.uuid4())
+
+        try:
+            result = ingest_chunks(
+                chunks=chunks,
+                document_id=document_id,
+                filename=file.filename,
+            )
+        except VectorServiceUnavailableError as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Vector storage service is currently unavailable: {str(e)}",
+            )
+        except VectorServiceConfigurationError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Vector storage configuration error: {str(e)}",
+            )
+        except VectorServiceIncompatibleError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Vector collection schema mismatch: {str(e)}",
+            )
+
+        return {
+            "document_id": document_id,
+            "filename": file.filename,
+            "characters_extracted": len(text),
+            "chunks_created": len(chunks),
+            **result,
+        }
+
+
+@router.get("/rag")
+async def rag(
+    query: str,
+    document_id: str,
+):
+    async with AIConcurrencyGuard():
+        try:
+            return generate_rag_answer(
+                query=query,
+                document_id=document_id,
+            )
+        except VectorServiceUnavailableError as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Vector search service is currently unavailable: {str(e)}",
+            )
+        except VectorServiceConfigurationError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Vector search configuration error: {str(e)}",
+            )
+
+
+# Existing non-LangGraph interview endpoint
+@router.post(
+    "/interview",
+    response_model=InterviewResponse,
+)
+async def interview(
+    request: InterviewRequest,
+):
+    async with AIConcurrencyGuard():
+        return generate_interview_response(
+            document_id=request.document_id,
+            question=request.question,
+            answer=request.answer,
+            target_role=request.target_role,
+            target_company=request.target_company,
+            use_resume_context=request.use_resume_context,
+            memory_context=request.memory_context,
+        )
+
+
+@router.post(
+    "/extract-memories",
+    response_model=MemoryExtractionResponse,
+)
+async def extract_memories_endpoint(
+    request: MemoryExtractionRequest,
+):
+    async with AIConcurrencyGuard():
+        return extract_memories(
+            question=request.question,
+            answer=request.answer,
+            evaluation=request.evaluation,
+        )
+
+
+# Start a new LangGraph interview session
+@router.post("/interview/start")
+async def start_interview(request: StartInterviewRequest):
+    async with AIConcurrencyGuard():
+        config = {
+            "configurable": {
+                "thread_id": request.session_id,
+            }
+        }
+
+        init_diff = (request.difficulty or "Medium").capitalize()
+
+        result = interview_graph.invoke(
+            {
+                "session_id": request.session_id,
+                "user_id": request.user_id,
+                "document_id": request.document_id,
+                "target_role": request.target_role,
+                "target_company": request.target_company,
+                "interview_type": request.interview_type or "Behavioral",
+                "difficulty": init_diff,
+                "starting_difficulty": init_diff,
+                "adaptive_difficulty": init_diff,
+                "stage_plan": request.stage_plan or [],
+                "current_stage_index": request.current_stage_index or 0,
+                "experience_level": request.experience_level or "fresher",
+                "years_of_experience": request.years_of_experience or "",
+                "focus_areas": request.focus_areas or "",
+                "resume_context": "",
+                "memory_context": request.memory_context,
+                "current_question": request.first_question,
+                "candidate_answer": "",
+                "evaluation": "",
+                "next_action": "",
+                "interview_response": "",
+                "sources": [],
+                "interview_history": [],
+                "final_report": "",
+                "memories": [],
+            },
+            config=config,
+        )
+
+        return {
+            "session_id": request.session_id,
+            "status": "waiting_for_answer",
+            "question": request.first_question,
+            "stage_plan": request.stage_plan or [],
+            "current_stage_index": request.current_stage_index or 0,
+            "starting_difficulty": init_diff,
+            "adaptive_difficulty": init_diff,
+            "difficulty": init_diff,
+        }
+
+
+# Submit an answer and resume the existing LangGraph session
+@router.post("/interview/{session_id}/answer")
+async def submit_interview_answer(
+    session_id: str,
+    request: InterviewAnswerRequest,
+):
+    async with AIConcurrencyGuard():
+        config = {
+            "configurable": {
+                "thread_id": session_id,
+            }
+        }
+
+        t_start = time.perf_counter()
+
+        try:
+            result = interview_graph.invoke(
+                Command(resume=request.answer),
+                config=config,
+            )
+
+            total_duration_ms = round((time.perf_counter() - t_start) * 1000, 2)
+            adaptive_diff = (result.get("adaptive_difficulty") or result.get("difficulty") or "Medium").capitalize()
+            starting_diff = (result.get("starting_difficulty") or adaptive_diff).capitalize()
+
+            # Interview finished
+            if result.get("final_report"):
+                print(f"[Turn Timing] session_id={session_id} total_turn_duration_ms={total_duration_ms} status=completed adaptive_diff={adaptive_diff}")
+                return {
+                    "session_id": session_id,
+                    "status": "completed",
+                    "final_report": result["final_report"],
+                    "stage_plan": result.get("stage_plan", []),
+                    "current_stage_index": result.get("current_stage_index", 0),
+                    "starting_difficulty": starting_diff,
+                    "adaptive_difficulty": adaptive_diff,
+                    "difficulty": adaptive_diff,
+                    "memories": result.get("memories", []),
+                    "turn_duration_ms": total_duration_ms,
+                }
+
+            # Interview continues
+            question = result.get("current_question")
+            print(f"[Turn Timing] session_id={session_id} total_turn_duration_ms={total_duration_ms} status=waiting_for_answer adaptive_diff={adaptive_diff}")
+
+            return {
+                "session_id": session_id,
+                "status": "waiting_for_answer",
+                "question": question,
+                "stage_plan": result.get("stage_plan", []),
+                "current_stage_index": result.get("current_stage_index", 0),
+                "starting_difficulty": starting_diff,
+                "adaptive_difficulty": adaptive_diff,
+                "difficulty": adaptive_diff,
+                "memories": result.get("memories", []),
+                "turn_duration_ms": total_duration_ms,
+            }
+
+        except Exception as error:
+            total_duration_ms = round((time.perf_counter() - t_start) * 1000, 2)
+            print(f"[Turn Timing] session_id={session_id} total_turn_duration_ms={total_duration_ms} status=error error={str(error)}")
+            raise HTTPException(
+                status_code=500,
+                detail=str(error),
+            )

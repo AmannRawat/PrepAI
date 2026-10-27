@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+google-genai>=2.28,<3.0
+pydantic
+pydantic-settings
+python-dotenv
+qdrant-client
+pypdf
+python-multipart
+langgraph
+langgraph-checkpoint-sqlite
+langsmith>=0.14.9
+langchain-core>=1.6.11

@@ -1,64 +1,109 @@
 @import "tailwindcss";
 
-/* New Way for applying css config */
-
-/* Dark Acedemia Aesthetic */
+/* PrepAI Design System - Modern Developer Aesthetic */
 @theme {
-  --color-background: #261F1C;      /* Rich Espresso */
-  --color-surface: #40322C;         /* Worn Leather */
-  /* --color-accent: #C5A15A;          Antique Gold */
-  --color-accent: #ffc554;          /* NEW Antique Gold */
-   --color-accent-darker: #B38F49;
-  --color-text-primary: #EAE0D5;   /* Aged Parchment */
-  --color-text-secondary: #A69888;  /* Muted Tan */
- /* --font-sans: 'Merriweather', serif; */
-  --font-sans: Inter, sans-serif;
+  --color-background: #090b0e;       /* Matte Near-Black Charcoal */
+  --color-surface: #12151b;          /* Matte Charcoal Dark Gray Surface */
+  --color-surface-hover: #181d24;    /* Muted Charcoal Hover Surface */
+  --color-surface-elevated: #1e232c; /* Elevated Dark Gray Surface */
+  --color-border: #232833;           /* Subtle Neutral Gray Border */
+  --color-accent: #10b981;           /* Emerald / Teal Primary Accent */
+  --color-accent-darker: #059669;    /* Deep Emerald */
+  --color-accent-teal: #14b8a6;      /* Cyan-Teal Accent */
+  --color-accent-orange: #f59e0b;    /* Warm Amber / Streak Highlight */
+  --color-accent-blue: #38bdf8;      /* Restrained Info Blue */
+  --color-text-primary: #f1f5f9;     /* Crisp Light Neutral */
+  --color-text-secondary: #94a3b8;   /* Muted Slate Secondary */
+  --color-text-muted: #64748b;       /* Subtle Hint Text */
+  --font-sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "Fira Code", monospace;
-   
 }
 
-/* This is NIGHT theme. When the '.night' class is active, these variables override the default ones. */
-.night {
-  --color-background: #0d0d0d;
-  --color-surface: #1a1a1a;
-  --color-accent: #00ff7f;
-  --color-text-primary: #e0e0e0;
-  --color-text-secondary: #888888;
+/* Dark Theme (Primary) - Strictly Unchanged */
+.dark, .night {
+  --color-background: #090b0e;
+  --color-surface: #12151b;
+  --color-surface-hover: #181d24;
+  --color-surface-elevated: #1e232c;
+  --color-border: #232833;
+  --color-accent: #10b981;
+  --color-accent-darker: #059669;
+  --color-accent-teal: #14b8a6;
+  --color-accent-orange: #f59e0b;
+  --color-accent-blue: #38bdf8;
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
 }
+
+/* Light Theme - Sophisticated Developer Light Aesthetic */
+.light {
+  --color-background: #F3F4F1;       /* Warm off-white / very light grey */
+  --color-surface: #E9ECE8;          /* Soft neutral grey for sidebar / secondary panels */
+  --color-surface-hover: #DFE4DE;    /* Soft neutral hover */
+  --color-surface-elevated: #FFFFFF; /* Pure crisp white for cards and floating panels */
+  --color-border: #DCE3DE;           /* Subtle soft neutral border */
+  --color-accent: #059669;           /* Rich primary emerald green */
+  --color-accent-darker: #047857;    /* Deep emerald */
+  --color-accent-teal: #0d9488;      /* Restrained teal */
+  --color-accent-orange: #d97706;    /* Amber / streak highlight */
+  --color-accent-blue: #0284c7;      /* Restrained info blue */
+  --color-text-primary: #171C1A;     /* Deep charcoal */
+  --color-text-secondary: #65716D;   /* Muted slate-grey */
+  --color-text-muted: #8E9C98;       /* Subtle hint text */
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 body {
-  /* This makes the body's background color and text color theme-aware */
   background-color: var(--color-background);
   color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
 }
 
-/* For Webkit browsers like Chrome, Safari, Edge */
+/* Custom WebKit Scrollbar */
 ::-webkit-scrollbar {
-  width: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-background);  /*  main background color */
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-
-  background-color: var(--color-surface); /*  warm brown surface color */
-  border-radius: 20px;
-  border: 2px solid var(--color-background);  /* Creates a nice padding effect */
+  background-color: rgba(148, 163, 184, 0.25);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: var(--color-accent); /*  burnt orange-red accent color */
+  background-color: var(--color-accent);
 }
 
-/* For Firefox */
+/* Firefox Scrollbar */
 html {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-accent) var(--color-background); /* thumb color, track color */
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
 }
 
-/* this for a smoother theme transition */
+/* Smooth transitions */
 * {
-  transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+  transition: background-color 0.15s ease-out, border-color 0.15s ease-out;
+}
+
+/* PrepAI DSA Coach: animate robot mouth while text is typing */
+@keyframes dsaRobotMouth {
+  from {
+    transform: scaleY(0.5);
+  }
+  to {
+    transform: scaleY(1.8);
+  }
+}
+
+.dsa-robot-mouth {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dsaRobotMouth 180ms ease-in-out infinite alternate;
 }

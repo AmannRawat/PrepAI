@@ -1,43 +1,81 @@
-# ========== General ==========
+# ========== OS & General ==========
 .DS_Store
+Thumbs.db
+
+# ========== Environment Files & Secrets ==========
 .env
 *.env
+.env.*
+!.env.example
+!*.env.example
+.env.local
+.env.development
+.env.test
+.env.production
+*.local
+
+# ========== Logs & Debugging ==========
 *.log
-build
-# ========== Logs ==========
-logs
+logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# ========== Node Modules (Both Frontend + Backend) ==========
+# ========== Dependencies ==========
 node_modules/
 client/node_modules/
 server/node_modules/
 
-# ========== Build Outputs ==========
+# ========== Build Outputs & Caches ==========
 dist/
 client/dist/
 server/dist/
 dist-ssr/
+build/
+.vite/
+.cache/
+.turbo/
+.eslintcache
 
-# ========== Vite ==========
-.vite
+# ========== Python Runtime & Virtual Environments ==========
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 
-# ========== Local/Env Configs ==========
-*.local
+# ========== SQLite Databases & Runtime Sidecars ==========
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 
-# ========== Editor Directories & Files ==========
+# ========== Generated Implementation & AI Development Reports ==========
+*REPORT*.md
+*_REPORT.md
+*_report.md
+
+# ========== Temporary Patches & Backups ==========
+*.patch
+*.diff
+*.bak
+*.backup
+
+# ========== Editor & IDE Directories ==========
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-
-# ========== OS Junk ==========
-Thumbs.db
