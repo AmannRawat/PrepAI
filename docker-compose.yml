@@ -1,30 +1,41 @@
-version: '3.8'
 
 services:
-  # 1. The Backend Service
+  # Node.js + Express backend
   backend:
-    build: ./server # Tells Docker to look in the /server folder for the Dockerfile
+    build:
+      context: ./server
     container_name: prepai-server
     ports:
-      - "5000:5000" # Maps host port 5000 to container port 5000
+      - "5000:5000"
     environment:
-      - PORT=5000 # Ensures Express binds to 5000 inside container regardless of server/.env
+      PORT: "5000"
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://host.docker.internal:9000}
+      QDRANT_URL: ${QDRANT_URL:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
-      - ./server/.env # Automatically injects your MongoDB URI and API keys!
-    restart: unless-stopped # If the server crashes, Docker will try to restart it
+      - path: ./server/.env
+        required: false
+    restart: unless-stopped
 
-  # 2. The Frontend Service
+  # React + Vite frontend
   frontend:
-    build: ./client # Tells Docker to look in the /client folder for the Dockerfile
+    build:
+      context: ./client
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:5000}
     container_name: prepai-client
     ports:
-      - "5173:5173" # Maps host port 5173 to container port 5173
+      - "5173:5173"
     environment:
-      - VITE_API_URL=http://localhost:5000
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:5000}
     depends_on:
-      - backend # Ensures the backend boots up BEFORE the frontend starts
+      - backend
     restart: unless-stopped
-  # 3. Local Vector Database (Optional for local development; skipped in production when using Qdrant Cloud)
+
+  # Optional local Qdrant for development only.
+  # Not started by the default `docker compose up`.
   qdrant:
     image: qdrant/qdrant:latest
     container_name: prepai-qdrant
@@ -36,6 +47,7 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    restart: unless-stopped
 
 volumes:
   qdrant_data:

@@ -1259,7 +1259,7 @@ const DsaArena = () => {
         </button>
       </div>
 
-      <div className="flex flex-1 flex-col lg:flex-row gap-5 overflow-visible lg:overflow-hidden">
+      <div className="flex flex-1 flex-col lg:flex-row gap-5 overflow-visible lg:overflow-hidden pb-20 lg:pb-0">
         {/* Problem Details Panel (Left) */}
         <div className="lg:w-2/5 flex flex-col bg-surface/70 backdrop-blur-md rounded-2xl border border-border/70 overflow-hidden shadow-lg min-h-[320px] lg:min-h-0">
           {/* Problem Tabs Header matching reference mockup */}

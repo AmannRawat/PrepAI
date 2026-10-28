@@ -15,10 +15,33 @@ from qdrant_client.models import (
 
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "prepai_knowledge"
+DEFAULT_COLLECTION_NAME = "prepai_knowledge"
 DEFAULT_VECTOR_SIZE = 3072
 DEFAULT_LOCAL_URL = "http://localhost:6333"
 DEFAULT_TIMEOUT_SECONDS = 10.0
+
+
+def get_collection_name() -> str:
+    """
+    Returns the configured PrepAI collection name, defaulting to 'prepai_knowledge'.
+    Ensures PrepAI uses its own dedicated collection and never touches other collections
+    (e.g. SiteMind) on a shared Qdrant cluster.
+    """
+    return os.getenv("QDRANT_COLLECTION", "").strip() or DEFAULT_COLLECTION_NAME
+
+
+def get_vector_size() -> int:
+    """
+    Returns the configured vector dimension, defaulting to 3072
+    (matching gemini-embedding-2 / text-embedding-004 native dimensions).
+    """
+    try:
+        return int(os.getenv("QDRANT_VECTOR_SIZE", str(DEFAULT_VECTOR_SIZE)))
+    except ValueError:
+        return DEFAULT_VECTOR_SIZE
+
+
+COLLECTION_NAME = get_collection_name()
 
 # Process-local client caching & mock injection
 _client_instance: Optional[QdrantClient] = None
@@ -105,6 +128,8 @@ def get_qdrant_config() -> Dict[str, Any]:
         "url": url,
         "api_key": api_key,
         "timeout": timeout,
+        "collection": get_collection_name(),
+        "vector_size": get_vector_size(),
         "is_cloud": is_remote_or_cloud_endpoint(url),
     }
 
@@ -180,20 +205,28 @@ def _handle_qdrant_exception(e: Exception, operation: str) -> None:
     raise VectorServiceUnavailableError(f"Vector storage operation '{operation}' failed.") from e
 
 
-def create_collection(vector_size: int = DEFAULT_VECTOR_SIZE) -> None:
+def create_collection(vector_size: Optional[int] = None) -> None:
     """
-    Creates or validates the prepai_knowledge collection with 3072 dimensions and Cosine distance.
+    Creates or validates the dedicated PrepAI collection (default prepai_knowledge)
+    with specified dimensions (default 3072) and Cosine distance.
     Validates schema compatibility if collection already exists.
     """
+    if vector_size is None:
+        try:
+            vector_size = int(os.getenv("QDRANT_VECTOR_SIZE", str(DEFAULT_VECTOR_SIZE)))
+        except ValueError:
+            vector_size = DEFAULT_VECTOR_SIZE
+
     client = get_qdrant_client()
+    target_collection = get_collection_name()
 
     try:
         collections_response = client.get_collections()
         existing_names = [c.name for c in collections_response.collections]
 
-        if COLLECTION_NAME in existing_names:
+        if target_collection in existing_names:
             # Validate schema compatibility
-            col_info = client.get_collection(collection_name=COLLECTION_NAME)
+            col_info = client.get_collection(collection_name=target_collection)
             vectors_cfg = getattr(getattr(col_info, "config", None), "params", None)
             vectors_params = getattr(vectors_cfg, "vectors", None)
 
@@ -209,20 +242,20 @@ def create_collection(vector_size: int = DEFAULT_VECTOR_SIZE) -> None:
 
             if actual_size is not None and actual_size != vector_size:
                 raise VectorServiceIncompatibleError(
-                    f"Vector collection '{COLLECTION_NAME}' exists with dimension {actual_size}, "
+                    f"Vector collection '{target_collection}' exists with dimension {actual_size}, "
                     f"which is incompatible with required model dimension {vector_size}."
                 )
             return
 
         # Collection does not exist: create with strict schema
         client.create_collection(
-            collection_name=COLLECTION_NAME,
+            collection_name=target_collection,
             vectors_config=VectorParams(
                 size=vector_size,
                 distance=Distance.COSINE,
             ),
         )
-        logger.info(f"[Qdrant Service] Created collection '{COLLECTION_NAME}' (size={vector_size}, distance=COSINE)")
+        logger.info(f"[Qdrant Service] Created collection '{target_collection}' (size={vector_size}, distance=COSINE)")
 
     except VectorServiceIncompatibleError:
         raise
@@ -246,7 +279,7 @@ def store_embedding(
 
     try:
         client.upsert(
-            collection_name=COLLECTION_NAME,
+            collection_name=get_collection_name(),
             points=[
                 PointStruct(
                     id=point_id,
@@ -275,12 +308,13 @@ def search_similar(
     """
     try:
         client = get_qdrant_client()
+        target_collection = get_collection_name()
         collections_response = client.get_collections()
-        if not any(c.name == COLLECTION_NAME for c in collections_response.collections):
+        if not any(c.name == target_collection for c in collections_response.collections):
             return []
 
         results = client.query_points(
-            collection_name=COLLECTION_NAME,
+            collection_name=target_collection,
             query=vector,
             query_filter=Filter(
                 must=[
@@ -318,8 +352,8 @@ def get_vector_service_status() -> Dict[str, Any]:
         "endpoint": sanitize_url(url),
         "is_cloud": is_remote_or_cloud_endpoint(url),
         "has_api_key_configured": bool(api_key),
-        "collection_name": COLLECTION_NAME,
-        "vector_dimension": DEFAULT_VECTOR_SIZE,
+        "collection_name": get_collection_name(),
+        "vector_dimension": get_vector_size(),
         "distance": "Cosine",
     }
 
@@ -328,4 +362,8 @@ def get_vector_service_status() -> Dict[str, Any]:
 def __getattr__(name: str) -> Any:
     if name == "client":
         return get_qdrant_client()
+    if name == "COLLECTION_NAME":
+        return get_collection_name()
+    if name == "DEFAULT_VECTOR_SIZE":
+        return get_vector_size()
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

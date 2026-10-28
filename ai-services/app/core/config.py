@@ -19,6 +19,8 @@ GEMINI_FAILOVER_ENABLED = os.getenv("GEMINI_FAILOVER_ENABLED", "false").lower() 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 QDRANT_TIMEOUT = float(os.getenv("QDRANT_TIMEOUT", "10.0"))
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "prepai_knowledge").strip() or "prepai_knowledge"
+QDRANT_VECTOR_SIZE = int(os.getenv("QDRANT_VECTOR_SIZE", "3072"))
 
 LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", os.getenv("LANGCHAIN_TRACING_V2", "false")).lower() in ("true", "1")
 LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", os.getenv("LANGCHAIN_API_KEY", ""))

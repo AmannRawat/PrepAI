@@ -14,6 +14,10 @@ COPY . .
 # Expose Vite's default port
 EXPOSE 5173
 
+# Capture build-time API URL and set default environment variable
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
+
 # Start the Vite development server
 # NOTE: We add "--host" so Vite allows connections from outside the Docker container!
 CMD ["npm", "run", "dev", "--", "--host"]
