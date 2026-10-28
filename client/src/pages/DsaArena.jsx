@@ -884,20 +884,24 @@ const DsaArena = () => {
         evaluationError: null,
       });
 
-      // Record activity after a successful submission.
-      axios
-        .post(
-          `${import.meta.env.VITE_API_URL}/api/user/record-activity`,
-          {},
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        )
-        .catch((err) => {
+      // Record activity after a successful submission with a fresh session token
+      (async () => {
+        try {
+          const freshToken = await getToken();
+          if (!freshToken) return;
+          await axios.post(
+            `${import.meta.env.VITE_API_URL}/api/user/record-activity`,
+            {},
+            {
+              headers: {
+                Authorization: `Bearer ${freshToken}`,
+              },
+            }
+          );
+        } catch (err) {
           console.error('Failed to record activity:', err);
-        });
+        }
+      })();
     } catch (err) {
       const errorMessage = err.response?.data?.error
         ? err.response.data.error

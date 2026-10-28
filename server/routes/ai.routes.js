@@ -31,8 +31,18 @@ router.post(
         error
       );
 
-      return res.status(500).json({
-        message: "Failed to process resume",
+      const status = error.status || error.statusCode || 500;
+      if (status === 429) {
+        const retryAfter = error.retryAfter || 10;
+        res.setHeader("Retry-After", String(retryAfter));
+        return res.status(429).json({
+          message: "AI service is temporarily receiving too many requests or warming up. Please retry shortly.",
+          retryAfter,
+        });
+      }
+
+      return res.status(status >= 500 ? 502 : status).json({
+        message: error.message || "Failed to process resume",
       });
     }
   }

@@ -538,6 +538,161 @@ async function runTests() {
     assert.equal(path.defaultValue, 0, "Default currentStreak must be 0");
   });
 
+  // ----------------------------------------------------
+  // Suite 10: Canonical Streak Synchronization & In-Progress Isolation
+  // ----------------------------------------------------
+  console.log("\n--- Suite 10: Canonical Streak Synchronization ---");
+
+  await test("getUserProgress and getCalendarActivity return identical currentStreak (5 days) for identical activity data", async () => {
+    const userId = "user_sync_555";
+    const now = new Date();
+    const day1 = new Date(Date.now() - 1 * 86400000);
+    const day2 = new Date(Date.now() - 2 * 86400000);
+    const day3 = new Date(Date.now() - 3 * 86400000);
+    const day4 = new Date(Date.now() - 4 * 86400000);
+
+    // 5 consecutive days of authentic activities
+    DsaSubmission.find = () => ({
+      select: () => ({
+        sort: () => ({
+          lean: async () => [
+            { createdAt: now, problem: { title: "P1" }, verdict: "Accepted" },
+            { createdAt: day1, problem: { title: "P2" }, verdict: "Accepted" },
+            { createdAt: day2, problem: { title: "P3" }, verdict: "Accepted" },
+          ],
+        }),
+      }),
+    });
+    ChatSession.find = () => ({
+      select: () => ({
+        sort: () => ({
+          lean: async () => [
+            { createdAt: day3, targetRole: "SWE", status: "completed" },
+          ],
+        }),
+      }),
+    });
+    ResumeReview.find = () => ({
+      select: () => ({
+        sort: () => ({
+          lean: async () => [
+            { createdAt: day4, jobTitle: "SWE" },
+          ],
+        }),
+      }),
+    });
+    User.findById = () => ({
+      select: () => ({
+        lean: async () => ({ currentStreak: 1 }), // Old stale value in DB
+      }),
+    });
+
+    const reqCalendar = { user: { id: userId }, query: { timezone: "UTC" } };
+    const resCalendar = createMockRes();
+    await getCalendarActivity(reqCalendar, resCalendar);
+
+    const reqProgress = { user: { id: userId }, query: { timezone: "UTC" } };
+    const resProgress = createMockRes();
+    await getUserProgress(reqProgress, resProgress);
+
+    assert.equal(resCalendar.statusCode, 200);
+    assert.equal(resProgress.statusCode, 200);
+
+    // Both endpoints MUST return identical currentStreak === 5, eliminating the 1-day vs 5-day UI discrepancy
+    assert.equal(resCalendar.jsonData.currentStreak, 5, "Calendar must compute 5 consecutive days");
+    assert.equal(resProgress.jsonData.currentStreak, 5, "Progress / Header must return 5 days instead of stale 1");
+    assert.equal(resCalendar.jsonData.currentStreak, resProgress.jsonData.currentStreak, "Header and Calendar must never disagree");
+  });
+
+  await test("In-progress interview with 0 candidate answers does not count as completed practice or inflate streak", async () => {
+    const userId = "user_in_progress_999";
+    const now = new Date();
+
+    // No submissions, no reviews, only 2 started interviews with 0 user answers
+    DsaSubmission.find = () => ({
+      select: () => ({ sort: () => ({ lean: async () => [] }) }),
+    });
+    ResumeReview.find = () => ({
+      select: () => ({ sort: () => ({ lean: async () => [] }) }),
+    });
+    ChatSession.find = () => ({
+      select: () => ({
+        sort: () => ({
+          lean: async () => [
+            {
+              createdAt: now,
+              targetRole: "Backend Engineer",
+              status: "active", // In progress
+              messages: [{ sender: "ai", text: "Welcome! Tell me about yourself." }], // 0 user messages
+            },
+          ],
+        }),
+      }),
+    });
+    User.findById = () => ({
+      select: () => ({ lean: async () => ({ currentStreak: 0, lastActivityDate: null }) }),
+    });
+
+    const req = { user: { id: userId }, query: { timezone: "UTC" } };
+    const res = createMockRes();
+    await getCalendarActivity(req, res);
+
+    assert.equal(res.statusCode, 200);
+    // 0 candidate answers means no qualifying practice day
+    assert.deepEqual(res.jsonData.activeDays, [], "Empty in-progress session must not count as active day");
+    assert.equal(res.jsonData.currentStreak, 0, "Empty session must not increment streak");
+    // But it still surfaces in today's milestones as In Progress for candidate visibility
+    assert.equal(res.jsonData.todayMilestones.length, 1);
+    assert.equal(res.jsonData.todayMilestones[0].status, "In Progress");
+  });
+
+  await test("Calling recordActivity preserves existing 5-day streak and never overwrites to 1", async () => {
+    const userId = "user_record_preserve_111";
+    const now = new Date();
+    const day1 = new Date(Date.now() - 1 * 86400000);
+    const day2 = new Date(Date.now() - 2 * 86400000);
+    const day3 = new Date(Date.now() - 3 * 86400000);
+    const day4 = new Date(Date.now() - 4 * 86400000);
+
+    DsaSubmission.find = () => ({
+      select: () => ({
+        sort: () => ({
+          lean: async () => [
+            { createdAt: now, problem: { title: "P1" }, verdict: "Accepted" },
+            { createdAt: day1, problem: { title: "P2" }, verdict: "Accepted" },
+            { createdAt: day2, problem: { title: "P3" }, verdict: "Accepted" },
+            { createdAt: day3, problem: { title: "P4" }, verdict: "Accepted" },
+            { createdAt: day4, problem: { title: "P5" }, verdict: "Accepted" },
+          ],
+        }),
+      }),
+    });
+    ChatSession.find = () => ({
+      select: () => ({ sort: () => ({ lean: async () => [] }) }),
+    });
+    ResumeReview.find = () => ({
+      select: () => ({ sort: () => ({ lean: async () => [] }) }),
+    });
+
+    let savedStreak = null;
+    User.findById = async () => ({
+      _id: userId,
+      currentStreak: 1, // Stale DB value before recording
+      lastActivityDate: null,
+      save: async function () {
+        savedStreak = this.currentStreak;
+      },
+    });
+
+    const req = { user: { id: userId }, body: { timezone: "UTC" } };
+    const res = createMockRes();
+    await recordActivity(req, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.jsonData.currentStreak, 5, "recordActivity must report 5-day streak from canonical data");
+    assert.equal(savedStreak, 5, "recordActivity must save 5-day streak to MongoDB, not reset to 1");
+  });
+
   // Restore mocks
   restoreOriginals();
 

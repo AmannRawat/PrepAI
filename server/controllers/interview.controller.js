@@ -181,8 +181,9 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
  * Structured diagnostic logger for interview operations.
  * Never logs credentials, API keys, tokens, or resume contents.
  */
-function logInterviewDiagnostic({ req, action, durationMs, status, error = null }) {
+function logInterviewDiagnostic({ req, action, durationMs, status, error = null, correlationId: explicitCorrelationId = null }) {
     const correlationId =
+        explicitCorrelationId ||
         req?.headers?.["x-request-id"] ||
         req?.headers?.["x-correlation-id"] ||
         crypto.randomUUID();
@@ -200,6 +201,9 @@ function logInterviewDiagnostic({ req, action, durationMs, status, error = null 
             upstreamStatus: error.status || error.statusCode || null,
             upstreamEndpoint: error.endpoint || null,
             upstreamDetail: error.details?.detail || error.details?.error || null,
+            isRateLimited: Boolean(error.isRateLimited || error.status === 429 || error.statusCode === 429),
+            ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}),
+            ...(error.headers && Object.keys(error.headers).length > 0 ? { upstreamHeaders: error.headers } : {}),
         } : {}),
     };
 
@@ -214,37 +218,47 @@ function logInterviewDiagnostic({ req, action, durationMs, status, error = null 
     return correlationId;
 }
 
-function resolveInterviewError(error, defaultMsg, timeoutMsg) {
-    const upstreamStatus = error.status || error.statusCode;
+export function resolveInterviewError(error, defaultMsg, timeoutMsg) {
+    const upstreamStatus = error?.status || error?.statusCode;
 
     const isTimeout =
-        error.name === "TimeoutError" ||
-        error.name === "AbortError" ||
-        error.code === 23 ||
+        error?.name === "TimeoutError" ||
+        error?.name === "AbortError" ||
+        error?.code === 23 ||
         upstreamStatus === 504 ||
-        error.message?.includes("aborted due to timeout") ||
-        error.message?.includes("timed out");
+        error?.message?.includes("aborted due to timeout") ||
+        error?.message?.includes("timed out");
+
+    const isRateLimited =
+        upstreamStatus === 429 ||
+        error?.isRateLimited === true ||
+        error?.message?.includes("429") ||
+        error?.message?.toLowerCase().includes("too many requests");
 
     const isUnavailable =
-        error.code === "ECONNREFUSED" ||
-        error.message?.includes("ECONNREFUSED") ||
-        error.message?.includes("fetch failed") ||
+        error?.code === "ECONNREFUSED" ||
+        error?.message?.includes("ECONNREFUSED") ||
+        error?.message?.includes("fetch failed") ||
         upstreamStatus === 502 ||
         upstreamStatus === 503;
 
     const isForbidden =
         upstreamStatus === 403 ||
-        error.message?.includes("Invalid or missing internal service key") ||
-        error.message?.includes("Forbidden");
+        error?.message?.includes("Invalid or missing internal service key") ||
+        error?.message?.includes("Forbidden");
 
     const isNotFound = upstreamStatus === 404;
 
     let statusCode = 500;
     let errorMsg = defaultMsg;
+    let retryAfter = error?.retryAfter || (isRateLimited ? 10 : undefined);
 
     if (isTimeout) {
         statusCode = 504;
         errorMsg = timeoutMsg || "The AI workflow timed out. Please try again.";
+    } else if (isRateLimited) {
+        statusCode = 429;
+        errorMsg = error?.details?.detail || "AI interview service is temporarily receiving too many requests or warming up. Please retry shortly.";
     } else if (isUnavailable) {
         statusCode = 503;
         errorMsg = "AI interview service is temporarily unavailable or waking up. Please try again shortly.";
@@ -256,16 +270,21 @@ function resolveInterviewError(error, defaultMsg, timeoutMsg) {
         errorMsg = "AI service communication error: interview endpoint not found. Please verify service configuration.";
     } else if (upstreamStatus === 500) {
         statusCode = 502;
-        errorMsg = error.details?.detail || error.message || "Upstream AI service encountered an error.";
-    } else if (error.message) {
+        errorMsg = error?.details?.detail || error?.message || "Upstream AI service encountered an error.";
+    } else if (error?.message) {
         errorMsg = error.message;
     }
 
-    return { statusCode, errorMsg, isTimeout };
+    return { statusCode, errorMsg, isTimeout, isRateLimited, retryAfter };
 }
 
 export async function startInterviewController(req, res) {
     const startTime = Date.now();
+    const correlationId =
+        req?.headers?.["x-request-id"] ||
+        req?.headers?.["x-correlation-id"] ||
+        crypto.randomUUID();
+
     try {
         if (!req.user || !req.user.id) {
             return res.status(401).json({
@@ -376,7 +395,7 @@ Requirements:
             focus_areas: focusAreas || "",
             memory_context: memoryContext,
             first_question: openingQuestion,
-        });
+        }, { correlationId });
 
         // Record session ownership in MongoDB
         await ChatSession.findOneAndUpdate(
@@ -405,7 +424,7 @@ Requirements:
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
 
-        logInterviewDiagnostic({ req, action: "startInterview", durationMs: Date.now() - startTime, status: 200 });
+        logInterviewDiagnostic({ req, action: "startInterview", durationMs: Date.now() - startTime, status: 200, correlationId });
 
         return res.status(200).json({
             sessionId: effectiveSessionId,
@@ -425,24 +444,31 @@ Requirements:
 
     } catch (error) {
         console.error("Error starting interview:", error);
-        const { statusCode, errorMsg, isTimeout } = resolveInterviewError(
+        const { statusCode, errorMsg, isTimeout, isRateLimited, retryAfter } = resolveInterviewError(
             error,
             "Failed to start interview.",
             "Starting the interview timed out while initializing the AI workflow. Please try again."
         );
 
-        const correlationId = logInterviewDiagnostic({
+        logInterviewDiagnostic({
             req,
             action: "startInterview",
             durationMs: Date.now() - startTime,
             status: statusCode,
             error,
+            correlationId,
         });
+
+        if (statusCode === 429 && retryAfter) {
+            res.setHeader("Retry-After", String(retryAfter));
+        }
 
         return res.status(statusCode).json({
             error: errorMsg,
             message: errorMsg,
             isTimeout,
+            isRateLimited: Boolean(isRateLimited),
+            ...(retryAfter ? { retryAfter } : {}),
             correlationId,
         });
     }
@@ -450,6 +476,11 @@ Requirements:
 
 export async function submitInterviewAnswerController(req, res) {
     const startTime = Date.now();
+    const correlationId =
+        req?.headers?.["x-request-id"] ||
+        req?.headers?.["x-correlation-id"] ||
+        crypto.randomUUID();
+
     try {
         if (!req.user || !req.user.id) {
             return res.status(401).json({
@@ -490,7 +521,8 @@ export async function submitInterviewAnswerController(req, res) {
 
         const result = await submitInterviewAnswer(
             sessionId,
-            answer.trim()
+            answer.trim(),
+            { correlationId }
         );
 
         // LangGraph returns memories extracted from this answer
@@ -549,7 +581,7 @@ export async function submitInterviewAnswerController(req, res) {
         }
         await session.save();
 
-        logInterviewDiagnostic({ req, action: "submitInterviewAnswer", durationMs: Date.now() - startTime, status: 200 });
+        logInterviewDiagnostic({ req, action: "submitInterviewAnswer", durationMs: Date.now() - startTime, status: 200, correlationId });
 
         return res.status(200).json({
             ...result,
@@ -566,24 +598,31 @@ export async function submitInterviewAnswerController(req, res) {
 
     } catch (error) {
         console.error("Error submitting interview answer:", error);
-        const { statusCode, errorMsg, isTimeout } = resolveInterviewError(
+        const { statusCode, errorMsg, isTimeout, isRateLimited, retryAfter } = resolveInterviewError(
             error,
             "Failed to process interview answer.",
             "The AI interview workflow took longer than expected to process your answer. Please submit again."
         );
 
-        const correlationId = logInterviewDiagnostic({
+        logInterviewDiagnostic({
             req,
             action: "submitInterviewAnswer",
             durationMs: Date.now() - startTime,
             status: statusCode,
             error,
+            correlationId,
         });
+
+        if (statusCode === 429 && retryAfter) {
+            res.setHeader("Retry-After", String(retryAfter));
+        }
 
         return res.status(statusCode).json({
             error: errorMsg,
             message: errorMsg,
             isTimeout,
+            isRateLimited: Boolean(isRateLimited),
+            ...(retryAfter ? { retryAfter } : {}),
             correlationId,
         });
     }
@@ -686,6 +725,12 @@ export async function getResumeStatusController(req, res) {
  * Uploads a resume PDF specifically for interview context and indexes it via Qdrant/FastAPI
  */
 export async function uploadInterviewResumeController(req, res) {
+    const startTime = Date.now();
+    const correlationId =
+        req?.headers?.["x-request-id"] ||
+        req?.headers?.["x-correlation-id"] ||
+        crypto.randomUUID();
+
     try {
         if (!req.user || !req.user.id) {
             return res.status(401).json({
@@ -705,7 +750,7 @@ export async function uploadInterviewResumeController(req, res) {
             });
         }
 
-        const ragResult = await uploadResume(req.file);
+        const ragResult = await uploadResume(req.file, { correlationId });
         const documentId = ragResult?.document_id || null;
 
         if (documentId) {
@@ -714,14 +759,40 @@ export async function uploadInterviewResumeController(req, res) {
             });
         }
 
+        logInterviewDiagnostic({ req, action: "uploadResume", durationMs: Date.now() - startTime, status: 200, correlationId });
+
         return res.status(200).json({
             documentId: documentId,
             message: "Resume uploaded and indexed successfully for interview context."
         });
     } catch (error) {
         console.error("Error uploading interview resume:", error);
-        return res.status(500).json({
-            error: error.message || "Failed to process and index resume."
+        const { statusCode, errorMsg, isTimeout, isRateLimited, retryAfter } = resolveInterviewError(
+            error,
+            "Failed to process and index resume.",
+            "Resume indexing timed out. Please try again."
+        );
+
+        logInterviewDiagnostic({
+            req,
+            action: "uploadResume",
+            durationMs: Date.now() - startTime,
+            status: statusCode,
+            error,
+            correlationId,
+        });
+
+        if (statusCode === 429 && retryAfter) {
+            res.setHeader("Retry-After", String(retryAfter));
+        }
+
+        return res.status(statusCode).json({
+            error: errorMsg,
+            message: errorMsg,
+            isTimeout,
+            isRateLimited: Boolean(isRateLimited),
+            ...(retryAfter ? { retryAfter } : {}),
+            correlationId,
         });
     }
 }

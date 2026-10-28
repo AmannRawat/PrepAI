@@ -7,14 +7,15 @@ import {
   getInterviewSessionController,
   getResumeStatusController,
   uploadInterviewResumeController,
-  buildAdaptiveStagePlan
+  buildAdaptiveStagePlan,
+  resolveInterviewError
 } from "../controllers/interview.controller.js";
 import { ChatSession } from "../models/BehavioralChat.model.js";
 import UserMemory from "../models/UserMemory.model.js";
 import User from "../models/User.model.js";
 import ResumeReview from "../models/ResumeReview.model.js";
 import * as memoryService from "../services/memory.service.js";
-import { AI_SERVICE_TIMEOUT_MS, getAiServiceUrl, AiServiceError } from "../services/ai.service.js";
+import { AI_SERVICE_TIMEOUT_MS, getAiServiceUrl, buildAiServiceUrl, parseAiResponse, AiServiceError } from "../services/ai.service.js";
 
 import { setCustomTextGenerator } from "../services/gemini.service.js";
 let lastGeneratedPrompt = "";
@@ -40,6 +41,11 @@ function createMockReqRes({ user, body = {}, params = {}, query = {}, file = nul
   const res = {
     statusCode: 200,
     data: null,
+    headers: {},
+    setHeader(name, value) {
+      this.headers[name.toLowerCase()] = String(value);
+      return this;
+    },
     status(code) {
       this.statusCode = code;
       return this;
@@ -1505,6 +1511,227 @@ async function runAllTests() {
     assert.equal(res.data.startingDifficulty, "Medium");
     assert.equal(res.data.adaptiveDifficulty, "Hard");
     assert.equal(res.data.messages.length, 5);
+  });
+
+  // 39. buildAiServiceUrl normalizes leading and trailing slashes to prevent double-slash 404s
+  await runTest("buildAiServiceUrl normalizes leading and trailing slashes to eliminate double slashes", async () => {
+    const origUrl = process.env.AI_SERVICE_URL;
+    try {
+      // Trailing slash on base URL + leading slash on path
+      process.env.AI_SERVICE_URL = "https://prepai-ai-services.onrender.com/";
+      assert.equal(buildAiServiceUrl("/interview/start"), "https://prepai-ai-services.onrender.com/interview/start");
+
+      // Multiple trailing slashes on base + multiple leading slashes on path
+      process.env.AI_SERVICE_URL = "https://prepai-ai-services.onrender.com///";
+      assert.equal(buildAiServiceUrl("///interview/start"), "https://prepai-ai-services.onrender.com/interview/start");
+
+      // No trailing slash on base + path without leading slash
+      process.env.AI_SERVICE_URL = "https://prepai-ai-services.onrender.com";
+      assert.equal(buildAiServiceUrl("interview/start"), "https://prepai-ai-services.onrender.com/interview/start");
+
+      // Double slash in path
+      assert.equal(buildAiServiceUrl("//interview/start"), "https://prepai-ai-services.onrender.com/interview/start");
+    } finally {
+      if (origUrl !== undefined) {
+        process.env.AI_SERVICE_URL = origUrl;
+      } else {
+        delete process.env.AI_SERVICE_URL;
+      }
+    }
+  });
+
+  // 40. parseAiResponse parses 429 status, Retry-After header, and safe diagnostics
+  await runTest("parseAiResponse parses 429 status, Retry-After header, and safe diagnostics", async () => {
+    // 40a: 429 with explicit Retry-After header and plain text body
+    const mockHeaders = new Map([
+      ["retry-after", "25"],
+      ["content-type", "text/plain"],
+      ["x-render-origin-server", "render-edge-proxy"],
+      ["authorization", "Bearer secret-token"]
+    ]);
+    const mockResponse1 = {
+      ok: false,
+      status: 429,
+      headers: {
+        get: (h) => mockHeaders.get(h.toLowerCase()) || null,
+      },
+      text: async () => "Too Many Requests"
+    };
+
+    let caughtErr1 = null;
+    try {
+      await parseAiResponse(mockResponse1, "/interview/start");
+    } catch (err) {
+      caughtErr1 = err;
+    }
+
+    assert.ok(caughtErr1 instanceof AiServiceError);
+    assert.equal(caughtErr1.status, 429);
+    assert.equal(caughtErr1.isRateLimited, true);
+    assert.equal(caughtErr1.retryAfter, 25);
+    assert.equal(caughtErr1.responseBody, "Too Many Requests");
+    assert.equal(caughtErr1.details, null);
+    assert.equal(caughtErr1.headers["retry-after"], "25");
+    assert.equal(caughtErr1.headers["x-render-origin-server"], "render-edge-proxy");
+    assert.equal(caughtErr1.headers["authorization"], undefined, "Sensitive headers must never be collected");
+
+    // 40b: 429 with missing Retry-After defaults to 10 seconds
+    const mockResponse2 = {
+      ok: false,
+      status: 429,
+      headers: {
+        get: () => null,
+      },
+      text: async () => "Too Many Requests"
+    };
+
+    let caughtErr2 = null;
+    try {
+      await parseAiResponse(mockResponse2, "/interview/start");
+    } catch (err) {
+      caughtErr2 = err;
+    }
+
+    assert.ok(caughtErr2 instanceof AiServiceError);
+    assert.equal(caughtErr2.status, 429);
+    assert.equal(caughtErr2.retryAfter, 10, "Default retryAfter must be 10 seconds when not provided");
+  });
+
+  // 41. resolveInterviewError maps 429 rate limit to HTTP 429 with Retry-After and avoids HTTP 500
+  await runTest("resolveInterviewError maps 429 rate limit to HTTP 429 and avoids HTTP 500", () => {
+    const rateLimitError = new AiServiceError("AI service error: 429 - Too Many Requests", {
+      status: 429,
+      endpoint: "/interview/start",
+      responseBody: "Too Many Requests",
+      retryAfter: 15
+    });
+
+    const resolved = resolveInterviewError(rateLimitError, "Failed to start interview.", "Timeout");
+    assert.equal(resolved.statusCode, 429, "Rate-limited upstream must map to HTTP 429, NOT 500");
+    assert.equal(resolved.isRateLimited, true);
+    assert.equal(resolved.retryAfter, 15);
+    assert.ok(resolved.errorMsg.includes("too many requests") || resolved.errorMsg.includes("warming up"));
+
+    // Plain error with message containing Too Many Requests
+    const generic429 = new Error("Too Many Requests");
+    generic429.statusCode = 429;
+    const resolvedGeneric = resolveInterviewError(generic429, "Failed to start interview.", "Timeout");
+    assert.equal(resolvedGeneric.statusCode, 429);
+    assert.equal(resolvedGeneric.retryAfter, 10, "Defaults to 10s fallback");
+  });
+
+  // 42. startInterviewController maps upstream 429 to HTTP 429 with Retry-After header and avoids HTTP 500
+  await runTest("startInterviewController maps upstream 429 to HTTP 429 with Retry-After header and avoids HTTP 500", async () => {
+    const origFetch = global.fetch;
+    const testCorrelationId = "test-corr-429-start";
+
+    try {
+      global.fetch = async () => ({
+        ok: false,
+        status: 429,
+        headers: {
+          get: (h) => h.toLowerCase() === "retry-after" ? "20" : (h.toLowerCase() === "content-type" ? "text/plain" : null)
+        },
+        text: async () => "Too Many Requests"
+      });
+
+      const { req, res } = createMockReqRes({
+        user: userA,
+        headers: { "x-correlation-id": testCorrelationId },
+        body: { targetRole: "Backend Engineer", targetCompany: "Google" }
+      });
+
+      await startInterviewController(req, res);
+
+      assert.equal(res.statusCode, 429, "Express must return HTTP 429 instead of HTTP 500");
+      assert.equal(res.headers["retry-after"], "20", "Retry-After header must be set on response");
+      assert.equal(res.data.isRateLimited, true);
+      assert.equal(res.data.retryAfter, 20);
+      assert.equal(res.data.correlationId, testCorrelationId);
+      assert.ok(!res.data.isTimeout);
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  // 43. submitInterviewAnswerController maps upstream 429 to HTTP 429 with Retry-After header and avoids HTTP 500
+  await runTest("submitInterviewAnswerController maps upstream 429 to HTTP 429 with Retry-After header and avoids HTTP 500", async () => {
+    const origFetch = global.fetch;
+    const answerSessionId = `test-answer-429-${Date.now()}`;
+
+    const sessionDoc = {
+      sessionId: answerSessionId,
+      user: userA.id,
+      stagePlan: ["Welcome", "Q1", "Wrap-up"],
+      currentStageIndex: 1,
+      status: "active",
+      messages: [{ sender: "ai", text: "Tell me about your background." }],
+      save: async () => {}
+    };
+    inMemoryChatSessions.set(answerSessionId, sessionDoc);
+
+    try {
+      global.fetch = async () => ({
+        ok: false,
+        status: 429,
+        headers: {
+          get: (h) => h.toLowerCase() === "retry-after" ? "12" : null
+        },
+        text: async () => "Too Many Requests"
+      });
+
+      const { req, res } = createMockReqRes({
+        user: userA,
+        params: { sessionId: answerSessionId },
+        body: { answer: "I have 4 years of experience building distributed backend systems." }
+      });
+
+      await submitInterviewAnswerController(req, res);
+
+      assert.equal(res.statusCode, 429, "Express must return HTTP 429 instead of HTTP 500");
+      assert.equal(res.headers["retry-after"], "12", "Retry-After header must be set on response");
+      assert.equal(res.data.isRateLimited, true);
+      assert.equal(res.data.retryAfter, 12);
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  // 44. uploadInterviewResumeController maps upstream 429 to HTTP 429 with Retry-After header and avoids HTTP 500
+  await runTest("uploadInterviewResumeController maps upstream 429 to HTTP 429 with Retry-After header and avoids HTTP 500", async () => {
+    const origFetch = global.fetch;
+    const testCorrelationId = "test-corr-429-upload";
+
+    try {
+      global.fetch = async () => ({
+        ok: false,
+        status: 429,
+        headers: {
+          get: (h) => h.toLowerCase() === "retry-after" ? "30" : (h.toLowerCase() === "content-type" ? "text/plain" : null)
+        },
+        text: async () => "Too Many Requests"
+      });
+
+      const { req, res } = createMockReqRes({
+        user: userA,
+        headers: { "x-correlation-id": testCorrelationId },
+        file: {
+          buffer: Buffer.from("%PDF-1.4 mock pdf content"),
+          mimetype: "application/pdf",
+          originalname: "resume.pdf"
+        }
+      });
+
+      await uploadInterviewResumeController(req, res);
+
+      assert.equal(res.statusCode, 429, "Express must return HTTP 429 instead of HTTP 500");
+      assert.equal(res.headers["retry-after"], "30", "Retry-After header must be set on response");
+      assert.equal(res.data.isRateLimited, true);
+      assert.equal(res.data.retryAfter, 30);
+      assert.equal(res.data.correlationId, testCorrelationId);
+    } finally {
+      global.fetch = origFetch;
+    }
   });
 
   console.log("\n-------------------------------------------------");

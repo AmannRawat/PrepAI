@@ -15,6 +15,15 @@ export function getAiServiceUrl() {
   return rawUrl.trim().replace(/\/+$/, "");
 }
 
+/**
+ * Normalizes and safely joins base AI service URL and endpoint path to prevent double-slash 404s.
+ */
+export function buildAiServiceUrl(path) {
+  const baseUrl = getAiServiceUrl();
+  const normalizedPath = "/" + String(path || "").replace(/^\/+/, "");
+  return `${baseUrl}${normalizedPath}`;
+}
+
 export const AI_SERVICE_URL = getAiServiceUrl();
 
 // 120s default timeout allows multi-step LangGraph graph execution (RAG retrieval + Gemini LLM generation) to complete
@@ -22,7 +31,7 @@ export const AI_SERVICE_TIMEOUT_MS =
   parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 120000;
 
 export class AiServiceError extends Error {
-  constructor(message, { status, endpoint, responseBody, details } = {}) {
+  constructor(message, { status, endpoint, responseBody, details, retryAfter = null, headers = {} } = {}) {
     super(message);
     this.name = "AiServiceError";
     this.status = status;
@@ -30,6 +39,9 @@ export class AiServiceError extends Error {
     this.endpoint = endpoint;
     this.responseBody = responseBody;
     this.details = details;
+    this.retryAfter = retryAfter;
+    this.headers = headers;
+    this.isRateLimited = status === 429;
   }
 }
 
@@ -50,8 +62,8 @@ function getInternalHeaders(customHeaders = {}) {
   return headers;
 }
 
-// Unpacks successful responses as JSON or extracts structured error messages from FastAPI exception details
-async function parseAiResponse(response, endpoint) {
+// Unpacks successful responses as JSON or extracts structured error messages and rate-limiting metadata from upstream
+export async function parseAiResponse(response, endpoint) {
   if (response.ok) {
     return response.json();
   }
@@ -62,7 +74,37 @@ async function parseAiResponse(response, endpoint) {
   try {
     details = JSON.parse(errorText);
   } catch {
-    // Non-JSON response
+    // Non-JSON response (e.g. plain text "Too Many Requests" from reverse proxies)
+  }
+
+  // Safely extract rate-limiting response headers without logging secrets or credentials
+  const retryAfterHeader = response.headers?.get ? response.headers.get("retry-after") : null;
+  let retryAfterSeconds = null;
+
+  if (retryAfterHeader) {
+    const parsedSeconds = parseInt(retryAfterHeader, 10);
+    if (!Number.isNaN(parsedSeconds) && parsedSeconds >= 0) {
+      retryAfterSeconds = parsedSeconds;
+    } else {
+      const parsedDate = new Date(retryAfterHeader).getTime();
+      if (!Number.isNaN(parsedDate)) {
+        retryAfterSeconds = Math.max(1, Math.ceil((parsedDate - Date.now()) / 1000));
+      }
+    }
+  }
+
+  // Collect safe non-sensitive headers for structured diagnostics
+  const safeHeaders = {};
+  if (response.headers?.get) {
+    for (const h of ["retry-after", "content-type", "server", "cf-ray", "x-render-origin-server"]) {
+      const val = response.headers.get(h);
+      if (val) safeHeaders[h] = val;
+    }
+  }
+
+  // If status is 429 and upstream did not supply a Retry-After header, provide a safe default of 10s
+  if (response.status === 429 && retryAfterSeconds === null) {
+    retryAfterSeconds = 10;
   }
 
   const detailMsg = details?.detail || details?.error || details?.message || errorText;
@@ -74,10 +116,12 @@ async function parseAiResponse(response, endpoint) {
     endpoint,
     responseBody: errorText,
     details,
+    retryAfter: retryAfterSeconds,
+    headers: safeHeaders,
   });
 }
 
-export async function uploadResume(file) {
+export async function uploadResume(file, options = {}) {
   const formData = new FormData();
 
   const blob = new Blob(
@@ -93,12 +137,20 @@ export async function uploadResume(file) {
     file.originalname
   );
 
+  const customHeaders = {};
+  const correlationId = options.correlationId || options.requestId;
+  if (correlationId) {
+    customHeaders["x-correlation-id"] = correlationId;
+    customHeaders["x-request-id"] = correlationId;
+  }
+
   const response = await fetch(
-    `${getAiServiceUrl()}/upload-pdf`,
+    buildAiServiceUrl("/upload-pdf"),
     {
       method: "POST",
-      headers: getInternalHeaders(),
+      headers: getInternalHeaders(customHeaders),
       body: formData,
+      signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
     }
   );
 
@@ -107,17 +159,26 @@ export async function uploadResume(file) {
 
 export async function retrieveResumeContext(
   query,
-  documentId
+  documentId,
+  options = {}
 ) {
   const params = new URLSearchParams({
     query,
     document_id: documentId,
   });
 
+  const customHeaders = {};
+  const correlationId = options.correlationId || options.requestId;
+  if (correlationId) {
+    customHeaders["x-correlation-id"] = correlationId;
+    customHeaders["x-request-id"] = correlationId;
+  }
+
   const response = await fetch(
-    `${getAiServiceUrl()}/rag?${params.toString()}`,
+    buildAiServiceUrl(`/rag?${params.toString()}`),
     {
-      headers: getInternalHeaders(),
+      headers: getInternalHeaders(customHeaders),
+      signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
     }
   );
 
@@ -134,7 +195,7 @@ export async function generateInterviewResponse(
   memoryContext
 ) {
   const response = await fetch(
-    `${getAiServiceUrl()}/interview`,
+    buildAiServiceUrl("/interview"),
     {
       method: "POST",
       headers: getInternalHeaders({
@@ -161,7 +222,7 @@ export async function extractMemories(
   evaluation
 ) {
   const response = await fetch(
-    `${getAiServiceUrl()}/extract-memories`,
+    buildAiServiceUrl("/extract-memories"),
     {
       method: "POST",
       headers: getInternalHeaders({
@@ -178,14 +239,21 @@ export async function extractMemories(
   return parseAiResponse(response, "/extract-memories");
 }
 
-export async function startInterview(data) {
+export async function startInterview(data, options = {}) {
+  const customHeaders = {
+    "Content-Type": "application/json",
+  };
+  const correlationId = options.correlationId || options.requestId;
+  if (correlationId) {
+    customHeaders["x-correlation-id"] = correlationId;
+    customHeaders["x-request-id"] = correlationId;
+  }
+
   const response = await fetch(
-    `${getAiServiceUrl()}/interview/start`,
+    buildAiServiceUrl("/interview/start"),
     {
       method: "POST",
-      headers: getInternalHeaders({
-        "Content-Type": "application/json",
-      }),
+      headers: getInternalHeaders(customHeaders),
       body: JSON.stringify(data),
       signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
     }
@@ -196,15 +264,23 @@ export async function startInterview(data) {
 
 export async function submitInterviewAnswer(
   sessionId,
-  answer
+  answer,
+  options = {}
 ) {
+  const customHeaders = {
+    "Content-Type": "application/json",
+  };
+  const correlationId = options.correlationId || options.requestId;
+  if (correlationId) {
+    customHeaders["x-correlation-id"] = correlationId;
+    customHeaders["x-request-id"] = correlationId;
+  }
+
   const response = await fetch(
-    `${getAiServiceUrl()}/interview/${sessionId}/answer`,
+    buildAiServiceUrl(`/interview/${sessionId}/answer`),
     {
       method: "POST",
-      headers: getInternalHeaders({
-        "Content-Type": "application/json",
-      }),
+      headers: getInternalHeaders(customHeaders),
       body: JSON.stringify({
         answer,
       }),

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { PDFParse } from "pdf-parse";
 
 import User from "../models/User.model.js";
@@ -60,10 +61,15 @@ export async function reviewResume(req, res) {
 
         const sanitizedResumeText = resumeText.slice(0, 20000);
 
+        const correlationId =
+            req?.headers?.["x-request-id"] ||
+            req?.headers?.["x-correlation-id"] ||
+            crypto.randomUUID();
+
         // Optional RAG indexing: index document if AI service is online, but do not block review if offline
         let documentId = null;
         try {
-            const ragResult = await uploadResume(req.file);
+            const ragResult = await uploadResume(req.file, { correlationId });
             documentId = ragResult?.document_id || null;
             if (documentId) {
                 await User.findByIdAndUpdate(userId, {
@@ -71,7 +77,8 @@ export async function reviewResume(req, res) {
                 });
             }
         } catch (ragError) {
-            console.warn("RAG indexing skipped/unavailable:", ragError.message);
+            const isRateLimited = Boolean(ragError?.isRateLimited || ragError?.status === 429);
+            console.warn(`[RAG Diagnostic WARN] action=indexResume status=${ragError?.status || 'unknown'} isRateLimited=${isRateLimited} retryAfter=${ragError?.retryAfter || null} correlationId=${correlationId} error=${ragError?.message || ragError}`);
         }
 
         // Prompt for Job-Description-Based ATS Scoring & Gap Analysis

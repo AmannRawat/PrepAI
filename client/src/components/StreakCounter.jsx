@@ -28,9 +28,13 @@ const StreakCounter = () => {
           return;
         }
 
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
         const response = await axios.get(
           `${import.meta.env.VITE_API_URL}/api/user/progress`,
           {
+            params: {
+              timezone: tz,
+            },
             headers: {
               Authorization: `Bearer ${token}`,
             },

@@ -289,14 +289,20 @@ const ResumeReviewer = () => {
         feedback: reviewData,
       });
 
-      // Record daily preparation activity
-      axios
-        .post(
-          `${import.meta.env.VITE_API_URL}/api/user/record-activity`,
-          {},
-          { headers: { Authorization: `Bearer ${token}` } }
-        )
-        .catch((actErr) => console.warn('Failed to record activity:', actErr.message));
+      // Record daily preparation activity with a fresh session token
+      (async () => {
+        try {
+          const freshToken = await getToken();
+          if (!freshToken) return;
+          await axios.post(
+            `${import.meta.env.VITE_API_URL}/api/user/record-activity`,
+            {},
+            { headers: { Authorization: `Bearer ${freshToken}` } }
+          );
+        } catch (actErr) {
+          console.warn('Failed to record activity:', actErr.message);
+        }
+      })();
     } catch (err) {
       const errorMessage =
         err.response?.data?.error ||
