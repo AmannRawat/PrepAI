@@ -31,7 +31,9 @@ import {
   isTopicSupported,
 } from "../services/dsaBlueprints.js";
 
-// In-memory per-user session tracking for topic rotation and pattern diversity
+// Bounded in-memory session cache (last 10 items) tracking recently loaded blueprints, topics,
+// and problem titles per user. Informs selectNextBlueprint() so consecutive requests rotate across topics
+// and do not serve duplicate problems in a single study session.
 const userRecentProblems = new Map();
 
 export function recordUserProblemLoad(userId, { blueprintId, topic, title } = {}) {
@@ -1345,8 +1347,11 @@ export async function generateProblem(req, res) {
 }
 
 /**
- * Runs code against visible / sample test cases ONLY.
- * Does not execute hidden test cases, and does not save a final submission.
+ * Executes candidate code against visible sample test cases only.
+ * 
+ * Used by the editor's "Run Code" button for quick feedback:
+ * - Omits hidden test cases so edge-case inputs cannot be discovered prematurely.
+ * - Does not create a persistent DsaSubmission database record or modify streak/analytics stats.
  */
 export async function runCode(req, res) {
   try {

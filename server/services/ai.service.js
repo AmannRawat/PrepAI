@@ -1,3 +1,15 @@
+/**
+ * Express-to-FastAPI AI Service Client Bridge
+ * 
+ * Centralizes all HTTP communication between the Node.js backend and the Python FastAPI
+ * AI microservice (RAG, Qdrant vector storage, LangGraph interview graphs).
+ * 
+ * Security & Reliability model:
+ * - Authenticates requests using a shared secret header (`x-internal-service-key`).
+ * - Guards long-running generative workflows with an explicit abort timeout (AI_SERVICE_TIMEOUT_MS).
+ * - Standardizes FastAPI error responses (including `detail` JSON payloads) into typed AiServiceError instances.
+ */
+
 export function getAiServiceUrl() {
   const rawUrl = process.env.AI_SERVICE_URL || "http://localhost:9000";
   return rawUrl.trim().replace(/\/+$/, "");
@@ -5,6 +17,7 @@ export function getAiServiceUrl() {
 
 export const AI_SERVICE_URL = getAiServiceUrl();
 
+// 120s default timeout allows multi-step LangGraph graph execution (RAG retrieval + Gemini LLM generation) to complete
 export const AI_SERVICE_TIMEOUT_MS =
   parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 120000;
 
@@ -30,12 +43,14 @@ export function getAiServiceSecret() {
   return secret.trim();
 }
 
+// Injects the shared service-to-service key into every upstream request to prevent unauthorized public access
 function getInternalHeaders(customHeaders = {}) {
   const headers = { ...customHeaders };
   headers["x-internal-service-key"] = getAiServiceSecret();
   return headers;
 }
 
+// Unpacks successful responses as JSON or extracts structured error messages from FastAPI exception details
 async function parseAiResponse(response, endpoint) {
   if (response.ok) {
     return response.json();

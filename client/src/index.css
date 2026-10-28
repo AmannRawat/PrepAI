@@ -107,3 +107,53 @@ html {
   transform-origin: center;
   animation: dsaRobotMouth 180ms ease-in-out infinite alternate;
 }
+
+/* Clerk Auth Component Enhancements */
+.cl-rootBox,
+.cl-cardBox,
+.cl-card,
+.cl-socialButtonsRoot,
+.cl-socialButtons,
+.cl-socialButtonsBlockButton {
+  overflow: visible !important;
+}
+
+.cl-card {
+  border: none !important;
+  box-shadow: none !important;
+  background-color: transparent !important;
+}
+
+.cl-socialButtonsBlockButton:hover {
+  background-color: #181d24 !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+}
+
+.cl-socialButtonsBlockButtonBadge,
+.cl-socialButtonsBlockButtonBadge__lastUsed,
+.cl-badge,
+.cl-badge__lastUsed {
+  overflow: visible !important;
+  z-index: 20 !important;
+  line-height: 1.2 !important;
+}
+
+.cl-footer,
+.cl-footerAction,
+.cl-footerActionText,
+.cl-footerActionLink {
+  background-color: transparent !important;
+  background: transparent !important;
+  border: none !important;
+}
+
+.cl-formFieldInput:focus {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 0 1px #10b981 !important;
+  outline: none !important;
+}
+
+.cl-formButtonPrimary:hover {
+  background-color: #34d399 !important;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35) !important;
+}

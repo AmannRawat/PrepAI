@@ -24,21 +24,18 @@ if (!process.env.AI_SERVICE_SECRET || !process.env.AI_SERVICE_SECRET.trim()) {
 
 const app = express();
 
-// Configure trust proxy safely (supports boolean, hop count, and validated subnet/IP lists)
+// Configure trust proxy safely to ensure Express correctly parses client IPs behind reverse proxies (Render, Vercel).
 const trustProxySetting = parseTrustProxy(process.env.TRUST_PROXY);
 app.set("trust proxy", trustProxySetting);
 
-// Initialize Clerk authentication first so getAuth(req) is available for rate-limit keying
+// Run Clerk middleware early so getAuth(req) can extract user IDs for authenticated rate-limit buckets.
 app.use(clerkMiddleware());
 
-// Apply general API rate limiter across all incoming endpoints (skips / and /ping)
+// General rate limiter protects against abusive request bursts; health probes (/ and /ping) are exempt.
 app.use(generalLimiter);
 
-// app.use("/api/auth", authRoutes);
-// Middleware
 app.use(cors({
-    // In production, this set FRONTEND_URL in Vercel.
-    // Locally, it defaults to localhost.
+    // Permitted client origins for local development and production Vercel deployments.
     origin: [
         "http://localhost:5173",
         "https://prepai-client-try.vercel.app",
@@ -48,7 +45,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Routes
+// Health probes for deployment monitoring and uptime heartbeats
 app.get('/', (req, res) => {
     res.status(200).json({ message: "PrepAI Backend is running!" });
 });
@@ -57,23 +54,25 @@ app.get('/ping', (req, res) => {
     res.status(200).send('Pong');
 });
 
-// Route for generating problems and code evaluation
+// DSA problem generation, test-case verification, and code execution endpoints
 app.use("/api", dsaRoutes);
 
+// Behavioral interview chat and audio analysis endpoints
 app.use("/api", behavioralRoutes);
 
+// Resume parsing, review generation, and PDF vector ingest routes
 app.use("/api", resumeRoutes);
 app.use("/api/resume", resumeRoutes);
 
-//ROUTE TO GET USER PROGRESS FOR DASHBOARD 
+// User profile, learning preferences, daily streaks, and aggregate progress
 app.use("/api/user", userRoutes);
 
+// Multi-turn LangGraph AI interview orchestration
 app.use("/api/interview", interviewRoutes);
 
-// MongoDB Connection
+// Connect to MongoDB Atlas before binding to the network port
 await connectDB();
 
-// Start the Server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });

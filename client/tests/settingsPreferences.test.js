@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { processSpeechVoices } from '../src/utils/speechUtils.js';
+import { getClerkAppearance } from '../src/utils/clerkTheme.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -266,6 +267,38 @@ runTest("DSA Arena renders robot with body outside the box on desktop and remove
   assert.ok(avatarCode.includes('withBody = false'), "PepeAvatar must support optional withBody prop");
   assert.ok(avatarCode.includes('viewBox={withBody ? "0 0 160 160" : "14 1 132 120"}'), "PepeAvatar must expand viewBox when withBody is true");
   assert.ok(avatarCode.includes('pepeAvatarBodyGroup'), "PepeAvatar must render body group when withBody is true");
+});
+
+// ----------------------------------------------------------------------------
+// Test Group 8: Clerk Sign-In UI & Theme Customization
+// ----------------------------------------------------------------------------
+runTest("Clerk sign-in & sign-up UI includes PepeAvatar, tagline, borderless card, and preserved auth routing", () => {
+  const appearance = getClerkAppearance();
+
+  // 1. Verify appearance variables & borderless card configuration
+  assert.equal(appearance.variables.colorPrimary, '#10b981', 'Must use emerald primary accent');
+  assert.equal(appearance.elements.card.border, 'none', 'Must eliminate nested card borders');
+  assert.equal(appearance.elements.card.backgroundColor, 'transparent', 'Card must have transparent background');
+  assert.equal(appearance.elements.header.display, 'none', 'Clerk default header must be hidden to display custom branded welcome');
+
+  // 2. Verify LoginModal.jsx integration
+  const modalPath = path.resolve(__dirname, '../src/components/LoginModal.jsx');
+  const modalCode = fs.readFileSync(modalPath, 'utf-8');
+  assert.ok(modalCode.includes('<PepeAvatar'), 'LoginModal must include PepeAvatar logo in welcome area');
+  assert.ok(modalCode.includes('Welcome back to PrepAI'), 'LoginModal must include Welcome back to PrepAI heading');
+  assert.ok(modalCode.includes('Your AI-powered interview preparation companion'), 'LoginModal must include tagline');
+  assert.ok(modalCode.includes('fallbackRedirectUrl="/"'), 'LoginModal must preserve fallbackRedirectUrl');
+
+  // 3. Verify LoginPage.jsx and SignupPage.jsx integration
+  const loginPath = path.resolve(__dirname, '../src/pages/LoginPage.jsx');
+  const loginCode = fs.readFileSync(loginPath, 'utf-8');
+  assert.ok(loginCode.includes('<PepeAvatar'), 'LoginPage must include PepeAvatar logo in welcome area');
+  assert.ok(loginCode.includes('getClerkAppearance()'), 'LoginPage must use getClerkAppearance()');
+
+  const signupPath = path.resolve(__dirname, '../src/pages/SignupPage.jsx');
+  const signupCode = fs.readFileSync(signupPath, 'utf-8');
+  assert.ok(signupCode.includes('<PepeAvatar'), 'SignupPage must include PepeAvatar logo');
+  assert.ok(signupCode.includes('getClerkAppearance()'), 'SignupPage must use getClerkAppearance()');
 });
 
 console.log(`\n=================================================`);

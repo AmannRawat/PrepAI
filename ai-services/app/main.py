@@ -16,18 +16,19 @@ async def validate_service_secret_on_startup():
         )
 
 
+# Rejects requests exceeding MAX_PAYLOAD_SIZE (default 5MB) before allocating memory for PDF extraction
 @app.middleware("http")
 async def payload_size_middleware(request: Request, call_next):
-    # Enforce maximum payload size bounds (e.g. 5MB)
     await check_payload_size(request)
     return await call_next(request)
 
 
-# Include AI routes protected by internal service authentication
+# All AI endpoints (RAG, Gemini chat, LangGraph agents) require the internal service key header
+# to guarantee only the Node.js Express backend can invoke them.
 app.include_router(ai_router, dependencies=[Depends(verify_internal_service_key)])
 
 
 @app.get("/health")
 async def health_check():
-    """Unauthenticated health check probe for orchestration/monitoring."""
+    """Unauthenticated liveness probe used by Docker and hosting container orchestrators."""
     return {"status": "healthy"}

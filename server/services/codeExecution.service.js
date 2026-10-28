@@ -29,7 +29,12 @@ function normalizeValue(value) {
 }
 
 /**
- * Compares actual and expected outputs, ignoring object key ordering.
+ * Compares actual code execution output with expected test case results.
+ * 
+ * Design considerations:
+ * 1. Object key order independence: Recursively sorts object keys before comparison so `{ a: 1, b: 2 }` matches `{ b: 2, a: 1 }`.
+ * 2. Cross-format resilience: Problem descriptions often supply expected outputs as formatted strings (e.g. "true", "42", "[1,2]"),
+ *    whereas candidate code returns native types. Handles safe string-to-primitive and JSON parsing unless strictTypes is requested.
  */
 export function valuesEqual(actual, expected, { strictTypes = false } = {}) {
     if (
@@ -95,7 +100,13 @@ export function valuesEqual(actual, expected, { strictTypes = false } = {}) {
 }
 
 /**
- * Builds the JavaScript harness for function-based DSA problem execution.
+ * Builds the JavaScript runner harness for DSA problem evaluation.
+ * 
+ * Execution mechanics:
+ * - Detects the solution function declaration and extracts parameter names.
+ * - Deep-clones test inputs per iteration to prevent in-place mutations from poisoning subsequent test runs.
+ * - Wraps each test in try/catch so one failing test does not abort the entire suite.
+ * - Emits results wrapped in __PREPAI_START__ and __PREPAI_END__ delimiters to isolate test JSON from console.log output.
  */
 function buildJavaScriptHarness(code, testCases) {
     const allMatches = [...code.matchAll(/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/g)];
@@ -203,7 +214,12 @@ ${code}
 }
 
 /**
- * Builds the Python harness for function-based DSA problem execution.
+ * Builds the Python 3 runner harness for DSA problem evaluation.
+ * 
+ * Execution mechanics:
+ * - Extracts function name and signature (filtering out type hints and 'self' for method solutions).
+ * - Uses copy.deepcopy on input parameters so candidate logic modifying arrays/dicts does not corrupt next tests.
+ * - Formats exceptions as `{type}: {message}` and traps stdout to __PREPAI_START__ / __PREPAI_END__ blocks.
  */
 function buildPythonHarness(code, testCases) {
     const match = code.match(
@@ -850,8 +866,14 @@ function isCompilationError(errorMsg) {
 }
 
 /**
- * Executes user code against a set of test cases using OnlineCompiler API.
- * Sanitizes output before returning to protect hidden test-case inputs and outputs.
+ * Executes user code against test cases using the OnlineCompiler remote compilation sandbox.
+ * 
+ * Safety & Reliability pipeline:
+ * 1. Payload validation: Enforces length bounds (<= 20,000 chars) and test case limits (<= 25).
+ * 2. Harness wrapping: Generates language-specific runner (JS, Python, Java, C++) injecting input structures.
+ * 3. Execution guards: Applies an 8-second time_limit in the compiler sandbox and a 15-second AbortSignal timeout on the HTTP call.
+ * 4. Verdict classification: Distinguishes Time Limit Exceeded (exit 124/137 or timeout status), Compilation Errors, and Runtime Errors.
+ * 5. Hidden test protection: Omits inputs and expected outputs for hidden test cases when returning failures to the client.
  */
 export async function executeCode({
     code,
