@@ -1016,7 +1016,7 @@ const SettingsPage = () => {
               </div>
 
               {/* Preferred Resume Section */}
-              <div className="p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
+              <div className="p-4 sm:p-6 rounded-2xl bg-surface/70 backdrop-blur-md border border-border/60">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                   <div>
                     <div className="flex items-center gap-2">
@@ -1085,52 +1085,59 @@ const SettingsPage = () => {
                     {resumes.map((resume) => (
                       <div
                         key={resume._id}
-                        className={`p-4 rounded-xl border transition flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+                        className={`p-3.5 sm:p-4 rounded-xl border transition flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 ${
                           resume.isPreferred
                             ? 'bg-emerald-500/10 border-emerald-500/40 shadow-xs'
                             : 'bg-surface-elevated/40 border-border hover:border-border/80'
                         }`}
                       >
-                        <div className="flex items-start gap-3 min-w-0">
-                          <div className={`p-2 rounded-lg shrink-0 ${resume.isPreferred ? 'bg-emerald-500/20 text-emerald-400' : 'bg-surface-elevated text-text-secondary'}`}>
+                        <div className="flex items-start gap-3 min-w-0 w-full sm:w-auto flex-1">
+                          <div className={`p-2 rounded-lg shrink-0 mt-0.5 ${resume.isPreferred ? 'bg-emerald-500/20 text-emerald-400' : 'bg-surface-elevated text-text-secondary'}`}>
                             <FileText size={18} />
                           </div>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-xs font-bold text-text-primary truncate">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                              <span
+                                className="text-xs font-bold text-text-primary truncate max-w-[180px] xs:max-w-[220px] sm:max-w-xs md:max-w-sm"
+                                title={resume.fileName}
+                              >
                                 {resume.fileName}
                               </span>
                               {resume.isPreferred && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold shrink-0">
                                   <BookmarkCheck size={11} /> Preferred Default
                                 </span>
                               )}
                               {resume.isHighestScore && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 text-[10px] font-bold">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 text-[10px] font-bold shrink-0">
                                   <Award size={11} /> Highest ATS
                                 </span>
                               )}
                               {resume.isNewest && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold shrink-0">
                                   Latest Upload
                                 </span>
                               )}
                             </div>
-                            <div className="flex flex-wrap items-center gap-3 text-[11px] text-text-secondary mt-1">
-                              <span>Target: <strong className="text-text-primary">{resume.jobTitle}</strong></span>
-                              <span>•</span>
-                              <span>Uploaded: {new Date(resume.createdAt).toLocaleDateString()}</span>
-                              <span>•</span>
-                              <span className={`font-semibold ${resume.atsScore >= 75 ? 'text-emerald-400' : resume.atsScore >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-text-secondary mt-1.5">
+                              <span className="truncate max-w-[200px] sm:max-w-xs">
+                                Target: <strong className="text-text-primary font-medium">{resume.jobTitle}</strong>
+                              </span>
+                              <span className="hidden xs:inline text-text-secondary/50">•</span>
+                              <span className="shrink-0 text-text-secondary/80">
+                                {new Date(resume.createdAt).toLocaleDateString()}
+                              </span>
+                              <span className="hidden xs:inline text-text-secondary/50">•</span>
+                              <span className={`font-semibold shrink-0 px-1.5 py-0.5 rounded ${resume.atsScore >= 75 ? 'bg-emerald-500/15 text-emerald-400' : resume.atsScore >= 50 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'}`}>
                                 ATS Score: {resume.atsScore}/100
                               </span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="self-end sm:self-auto shrink-0">
+                        <div className="w-full sm:w-auto shrink-0 pt-2 sm:pt-0 border-t border-border/40 sm:border-t-0 flex justify-end sm:block">
                           {resume.isPreferred ? (
-                            <span className="px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-xs font-semibold inline-flex items-center gap-1">
+                            <span className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-emerald-500/15 text-emerald-400 text-xs font-semibold inline-flex items-center justify-center gap-1.5">
                               <Check size={14} /> Active Preferred
                             </span>
                           ) : (
@@ -1138,7 +1145,7 @@ const SettingsPage = () => {
                               type="button"
                               disabled={isSettingPreferred}
                               onClick={() => handleSelectPreferredResume(resume._id)}
-                              className="px-3 py-1.5 rounded-lg bg-surface-elevated hover:bg-surface-elevated/80 border border-border text-xs font-semibold text-text-primary transition cursor-pointer"
+                              className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-surface-elevated hover:bg-surface-elevated/80 border border-border text-xs font-semibold text-text-primary transition cursor-pointer flex items-center justify-center gap-1.5"
                             >
                               Set as Preferred
                             </button>

@@ -666,6 +666,23 @@ export default function DsaCoach({
             currentExecution.verdict &&
             currentExecution.verdict !== "Accepted");
 
+    const unlockAudio = useCallback(() => {
+        if (typeof window === "undefined") return;
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+
+        try {
+            if (!audioContextRef.current) {
+                audioContextRef.current = new AudioContextClass();
+            }
+            if (audioContextRef.current.state === "suspended") {
+                audioContextRef.current.resume().catch(() => {});
+            }
+        } catch {
+            // Audio unlock error handling
+        }
+    }, []);
+
     const sound = useCallback(
         (type) => {
             if (soundEnabled) {
@@ -677,13 +694,19 @@ export default function DsaCoach({
 
     const clampPosition = useCallback(
         (x, y) => {
+            if (typeof window === "undefined") {
+                return { x, y };
+            }
+
             const panel = panelRef.current;
             const width = panel?.offsetWidth ?? panelSize.width;
             const height = panel?.offsetHeight ?? panelSize.height;
+            const isMobile = window.innerWidth < 768;
+            const bottomMargin = isMobile ? 80 : 16;
 
             return {
-                x: Math.max(12, Math.min(x, window.innerWidth - width - 12)),
-                y: Math.max(12, Math.min(y, window.innerHeight - height - 12)),
+                x: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
+                y: Math.max(12, Math.min(y, window.innerHeight - height - bottomMargin)),
             };
         },
         [panelSize.width, panelSize.height]
@@ -1448,6 +1471,7 @@ export default function DsaCoach({
     };
 
     const handleHint = () => {
+        unlockAudio();
         if (!isLoggedIn) {
             openLogin();
             return;
@@ -1459,6 +1483,7 @@ export default function DsaCoach({
     };
 
     const handleGiveUp = () => {
+        unlockAudio();
         if (!isLoggedIn) {
             openLogin();
             return;
@@ -1473,6 +1498,7 @@ export default function DsaCoach({
     };
 
     const handleExplainApproach = () => {
+        unlockAudio();
         if (!isLoggedIn) {
             openLogin();
             return;
@@ -1483,6 +1509,7 @@ export default function DsaCoach({
     };
 
     const handleShowSolution = () => {
+        unlockAudio();
         if (!isLoggedIn) {
             openLogin();
             return;
@@ -1495,6 +1522,7 @@ export default function DsaCoach({
     };
 
     const handleDebugSolution = () => {
+        unlockAudio();
         if (!isLoggedIn) {
             openLogin();
             return;
@@ -1536,10 +1564,13 @@ export default function DsaCoach({
         return (
             <button
                 type="button"
-                onClick={() => setIsOpen(true)}
+                onClick={() => {
+                    unlockAudio();
+                    setIsOpen(true);
+                }}
                 aria-label="Open PrepAI DSA Coach"
                 title="Open PrepAI Coach"
-                className="fixed bottom-5 right-5 z-[80] h-14 w-14 rounded-full border border-text-secondary/30 bg-surface p-1 shadow-xl transition hover:scale-105"
+                className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:bottom-5 right-4 md:right-5 z-[80] h-14 w-14 rounded-full border border-text-secondary/30 bg-surface p-1 shadow-xl transition hover:scale-105"
             >
                 <PrepAIRobot speaking={isTyping} thinking={isRequesting} expression={expression} />
                 <span className="absolute right-0.5 top-0.5 h-3 w-3 rounded-full border-2 border-surface bg-emerald-500" />
@@ -1570,7 +1601,10 @@ export default function DsaCoach({
                 className="relative flex w-full flex-col overflow-hidden rounded-2xl border border-text-secondary/25 bg-surface text-text-primary shadow-xl"
             >
                 <header
-                    onPointerDown={startDragging}
+                    onPointerDown={(event) => {
+                        unlockAudio();
+                        startDragging(event);
+                    }}
                     onPointerMove={dragPanel}
                     onPointerUp={() => {
                         dragRef.current = null;
@@ -1580,13 +1614,18 @@ export default function DsaCoach({
                     }}
                     className="flex shrink-0 touch-none cursor-grab items-center gap-2 border-b border-text-secondary/20 px-3 py-2 active:cursor-grabbing"
                 >
-                    <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <h2 className="text-sm font-semibold">PrepAI Coach</h2>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-500">
-                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                DSA mentor
-                            </span>
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <div className="h-7 w-7 sm:h-8 sm:w-8 shrink-0">
+                            <PrepAIRobot speaking={isTyping} thinking={isRequesting} expression={expression} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h2 className="text-sm font-semibold truncate">PrepAI Coach</h2>
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-500 shrink-0">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                    DSA mentor
+                                </span>
+                            </div>
                         </div>
                     </div>
 
@@ -1594,7 +1633,10 @@ export default function DsaCoach({
                         <button
                             type="button"
                             onPointerDown={(event) => event.stopPropagation()}
-                            onClick={() => setSoundEnabled((prev) => !prev)}
+                            onClick={() => {
+                                unlockAudio();
+                                setSoundEnabled((prev) => !prev);
+                            }}
                             aria-label={soundEnabled ? "Mute typing sound" : "Enable typing sound"}
                             title={soundEnabled ? "Mute typing sound" : "Enable typing sound"}
                             className={`shrink-0 rounded-lg p-1.5 transition ${soundEnabled
@@ -1845,6 +1887,7 @@ export default function DsaCoach({
                         <form
                             onSubmit={(event) => {
                                 event.preventDefault();
+                                unlockAudio();
                                 sendUserMessage(input);
                             }}
                             className="flex shrink-0 items-center gap-2 border-t border-text-secondary/20 p-2"
@@ -1852,6 +1895,8 @@ export default function DsaCoach({
                             <input
                                 value={input}
                                 onChange={(event) => setInput(event.target.value)}
+                                onFocus={unlockAudio}
+                                onClick={unlockAudio}
                                 disabled={isTyping || isRequesting}
                                 placeholder="Ask your DSA coach..."
                                 aria-label="Message PrepAI Coach"
@@ -1860,6 +1905,7 @@ export default function DsaCoach({
 
                             <button
                                 type="submit"
+                                onClick={unlockAudio}
                                 disabled={!input.trim() || isTyping || isRequesting}
                                 aria-label="Send message"
                                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1869,7 +1915,10 @@ export default function DsaCoach({
 
                             <button
                                 type="button"
-                                onClick={() => setSoundEnabled((enabled) => !enabled)}
+                                onClick={() => {
+                                    unlockAudio();
+                                    setSoundEnabled((enabled) => !enabled);
+                                }}
                                 aria-label={soundEnabled ? "Mute coach sounds" : "Enable coach sounds"}
                                 title={soundEnabled ? "Mute sounds" : "Enable sounds"}
                                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-text-secondary/20 text-text-secondary hover:bg-text-secondary/10"

@@ -33,6 +33,8 @@ import {
   ArrowRight,
   Circle,
   CheckCircle2,
+  MessageSquare,
+  ListOrdered,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -306,6 +308,7 @@ const BehavioralCoach = () => {
   const [interviewType, setInterviewType] = useState('Behavioral'); // 'Technical' | 'Behavioral' | 'Mixed'
   const [stagePlan, setStagePlan] = useState([]);
   const [currentStageIndex, setCurrentStageIndex] = useState(0);
+  const [mobileActiveView, setMobileActiveView] = useState('interview'); // 'interview' | 'setup'
 
   // Resume status & Upload state
   const [resumeStatus, setResumeStatus] = useState({ hasResume: false, documentId: null });
@@ -949,6 +952,7 @@ const BehavioralCoach = () => {
     setIsSessionOver(false);
     setUploadSuccess(false);
     setShowSetup(true);
+    setMobileActiveView('setup');
     setActivityRecorded(false);
     isInitialScrolledRef.current = false;
     lastHydratedSessionIdRef.current = null;
@@ -1058,6 +1062,7 @@ const BehavioralCoach = () => {
     setActivityRecorded(false);
     setUploadSuccess(false);
     setShowSetup(true);
+    setMobileActiveView('setup');
     isInitialScrolledRef.current = false;
     lastHydratedSessionIdRef.current = null;
     isNearBottomRef.current = true;
@@ -1153,6 +1158,7 @@ const BehavioralCoach = () => {
       setStartingDifficulty(startDiff);
       setAdaptiveDifficulty(adaptDiff);
       setShowSetup(false);
+      setMobileActiveView('interview');
       setIsSessionOver(false);
 
       trackEvent(ALLOWED_EVENTS.BEHAVIORAL_INTERVIEW_STARTED, {
@@ -1381,8 +1387,22 @@ const BehavioralCoach = () => {
 
 
 
+  const activeStages = stagePlan && stagePlan.length > 0 ? stagePlan : [
+    'Welcome and Introduction',
+    'Fundamentals & Core Concepts',
+    'Problem Solving & Experience',
+    'Behavioral & Situational Questions',
+    'Wrap-up'
+  ];
+  const totalStages = activeStages.length;
+  const completedStages = isSessionOver ? totalStages : Math.min(currentStageIndex, totalStages);
+  const currentStageName = activeStages[Math.min(currentStageIndex, Math.max(0, totalStages - 1))] || 'Active Stage';
+  const progressPercent = totalStages > 0
+    ? Math.min(100, Math.round((completedStages / totalStages) * 100))
+    : 0;
+
   return (
-    <div className="flex flex-col flex-1 h-[85vh] md:h-full p-4 pt-4 bg-surface/70 rounded-lg border border-text-secondary/20 relative">
+    <div className="flex flex-col flex-1 min-h-[75vh] md:h-full p-3 sm:p-4 bg-surface/70 rounded-lg border border-text-secondary/20 relative">
       {/* SETUP MODAL OVERLAY */}
       {showSetup && (
         <div className="absolute inset-0 z-50 bg-background/95 backdrop-blur-sm flex items-center justify-center p-4 rounded-lg overflow-y-auto">
@@ -1696,10 +1716,53 @@ const BehavioralCoach = () => {
         </div>
       </header>
 
+      {/* MOBILE INTERVIEW NAVIGATION SWITCHER (When session is active) */}
+      {sessionId && (
+        <div className="flex lg:hidden items-center justify-between p-1.5 mb-3 bg-surface/90 border border-text-secondary/20 rounded-xl shrink-0">
+          <div className="grid grid-cols-2 gap-1 flex-1 mr-2">
+            <button
+              type="button"
+              onClick={() => setMobileActiveView('interview')}
+              className={`py-2 px-3 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                mobileActiveView === 'interview'
+                  ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              <MessageSquare size={13} />
+              <span>Interview Chat</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMobileActiveView('setup')}
+              className={`py-2 px-3 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                mobileActiveView === 'setup'
+                  ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              <ListOrdered size={13} />
+              <span>Stages & Setup</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExitInterview}
+            className="p-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs shrink-0"
+            title="End Interview"
+            aria-label="End Interview"
+          >
+            <LogOut size={14} />
+          </button>
+        </div>
+      )}
+
       {/* MAIN TWO-COLUMN WORKSPACE: Setup & Progress on Left, Chat & Voice Studio on Right */}
       <div className="flex flex-col lg:flex-row flex-1 min-h-0 gap-4 overflow-hidden">
         {/* LEFT COLUMN: Setup & Progress */}
-        <div className="w-full lg:w-72 xl:w-80 shrink-0 flex flex-col gap-3.5 overflow-y-auto pr-1">
+        <div className={`w-full lg:w-72 xl:w-80 shrink-0 flex flex-col gap-3.5 overflow-y-auto pr-1 ${sessionId && mobileActiveView === 'interview' ? 'hidden lg:flex' : 'flex'}`}>
           {/* Card 1: Interview Setup */}
           <div className="bg-surface/90 border border-text-secondary/20 rounded-2xl p-4 shadow-sm backdrop-blur-sm space-y-3.5">
             <div className="flex items-center justify-between">
@@ -1711,6 +1774,24 @@ const BehavioralCoach = () => {
                   Resume Active
                 </span>
               )}
+            </div>
+
+            {/* Target Role */}
+            <div>
+              <label className="block text-[11px] font-semibold text-text-secondary mb-1">
+                Target Role <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={targetRole ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setTargetRole(val);
+                  saveBehavioralState({ targetRole: val });
+                }}
+                placeholder="e.g. Software Engineer, Frontend"
+                className="w-full p-2.5 bg-background border border-text-secondary/30 rounded-xl text-text-primary text-xs font-medium focus:border-emerald-500 outline-none"
+              />
             </div>
 
             {/* Company */}
@@ -1835,6 +1916,14 @@ const BehavioralCoach = () => {
                 })}
               </div>
             </div>
+
+            {/* In-Card Error Feedback */}
+            {errorMessage && (
+              <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-2.5 rounded-xl text-xs flex items-start gap-2">
+                <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
 
             {/* Start / Restart Interview Button */}
             <button
@@ -1991,7 +2080,31 @@ const BehavioralCoach = () => {
         </div>
 
         {/* RIGHT COLUMN: Chat conversation & Voice Studio */}
-        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+        <div className={`flex-1 min-w-0 flex flex-col h-full overflow-hidden ${!sessionId ? 'hidden lg:flex' : mobileActiveView === 'setup' ? 'hidden lg:flex' : 'flex'}`}>
+          {/* Compact Stage Tracker on Mobile */}
+          {sessionId && (
+            <div className="lg:hidden bg-surface/90 border border-text-secondary/20 rounded-xl p-2.5 mb-2 flex items-center justify-between gap-2 shrink-0 shadow-sm">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                <span className="text-xs font-bold text-text-primary truncate">
+                  Stage {currentStageIndex + 1}/{totalStages}: {currentStageName}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[10px] font-semibold text-emerald-400 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                  {adaptiveDifficulty || startingDifficulty || difficulty}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMobileActiveView('setup')}
+                  className="text-[11px] text-emerald-400 font-medium underline"
+                >
+                  Stages
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Chat Messages */}
           <div
             ref={chatContainerRef}
@@ -2204,7 +2317,7 @@ const BehavioralCoach = () => {
           {!isSessionOver ? (
             isVoiceMode ? (
               /* MODERN VOICE RECORDING STUDIO (Matches Reference Screenshot) */
-              <div className="bg-surface/95 border border-emerald-500/30 rounded-2xl p-4 shadow-2xl backdrop-blur-md mb-16 md:mb-2 animate-in fade-in zoom-in duration-200">
+              <div className="bg-surface/95 border border-emerald-500/30 rounded-2xl p-4 shadow-2xl backdrop-blur-md mb-2 md:mb-2 animate-in fade-in zoom-in duration-200">
                 {/* 1. Status prompt */}
                 <div className="text-center mb-1">
                   <span className="text-xs font-medium text-text-secondary">
@@ -2312,7 +2425,7 @@ const BehavioralCoach = () => {
               </div>
             ) : (
               /* REGULAR TYPED INPUT WITH VOICE BUTTON */
-              <form onSubmit={handleSubmit} className="flex items-center gap-2 md:gap-3 mb-16 md:mb-0">
+              <form onSubmit={handleSubmit} className="flex items-center gap-2 md:gap-3 mb-2 md:mb-0">
                 <input
                   type="text"
                   value={input ?? ''}
