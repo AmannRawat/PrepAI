@@ -1,307 +1,463 @@
 # 🚀 PrepAI 2.0 — AI-Powered Interview Preparation Platform
 
-PrepAI 2.0 is a full-stack AI-powered platform designed to help software engineering candidates prepare for technical and behavioral interviews.
+PrepAI 2.0 is a full-stack AI-powered platform that helps software engineering candidates prepare for technical and behavioral interviews through coding practice, personalized interview simulations, resume analysis, and adaptive learning.
 
-It combines coding practice, AI-assisted code evaluation, structured behavioral mock interviews, and resume-based contextual retrieval in one application.
+The platform combines a React frontend, a Node.js and Express application backend, and a Python/FastAPI AI service. LangGraph orchestrates stateful interview workflows, Gemini powers AI-driven features, MongoDB Atlas stores application data, and Qdrant supports semantic retrieval of resume information.
 
-The project has evolved from a traditional React and Node.js application into a multi-service architecture, with a dedicated Python AI service for AI workflows, LangGraph orchestration, and vector retrieval.
+Rather than treating interview preparation as a collection of disconnected AI prompts, PrepAI brings coding practice, contextual interview coaching, resume feedback, and learning progress into one application.
 
-**The goal:** build an interview preparation platform that does more than generate AI responses — it maintains interview state, retrieves relevant candidate context, evaluates answers, and supports a more personalized preparation experience.
+**Live application:** [prepai-app.vercel.app](https://prepai-app.vercel.app/)
 
 ## Table of Contents
 
 - [Features](#-features)
 - [Architecture](#-architecture)
-- [Technology Stack](#-technology-stack)
 - [How It Works](#-how-it-works)
+- [Technology Stack](#-technology-stack)
 - [Engineering Decisions](#-engineering-decisions)
 - [Repository Structure](#-repository-structure)
 - [Getting Started](#-getting-started)
 - [Environment Configuration](#-environment-configuration)
 - [Testing](#-testing)
 - [Deployment](#-deployment)
-- [Security Considerations](#-security-considerations)
-- [Current Status and Roadmap](#-current-status-and-roadmap)
+- [Security and Reliability](#-security-and-reliability)
+- [Project Status and Roadmap](#-project-status-and-roadmap)
 - [Contributing](#-contributing)
-- [Author and License](#-author-and-license)
+- [Author](#-author)
 
 ---
 
 ## ✨ Features
 
-### 1. DSA Arena
+### 1. 🔢 DSA Arena and Code Execution Engine
 
-Practice data structures and algorithms through an interactive coding environment.
+Practice data structures and algorithms in an interactive coding environment with AI-assisted problem generation, remote code execution, and detailed feedback.
 
-- Generate coding problems based on topics and difficulty.
-- Write and edit code in a browser-based editor.
-- Work with supported programming languages, including C++, Java, JavaScript, and Python, where enabled.
-- Receive AI-assisted feedback on code correctness, complexity, edge cases, and possible improvements.
-- Use problem validation and repair mechanisms to improve the reliability of generated challenges.
-- Explore company-specific coding questions from a curated question catalog.
-- Track coding progress and avoid repetitive practice where supported by the application.
+#### Multi-language code editor
 
-The platform combines AI-generated content with validation logic instead of assuming every generated problem or solution is correct.
+- Supports JavaScript (Node.js), Python 3, Java, and C++.
+- Uses CodeMirror for syntax highlighting, line numbers, code folding, and bracket matching.
+- Includes a client-side code-formatting workflow for supported languages.
+- Provides problem, editor, and feedback panels for the coding workflow.
 
-### 2. Behavioral Interview Coach
+#### Remote code execution and evaluation
 
-Practice behavioral interviews through a conversational AI coach.
+PrepAI uses the configured **OnlineCompiler API** to execute submitted code instead of implementing its own language runtime.
 
-- Conduct structured, multi-turn mock interviews.
-- Answer questions based on your experience and projects.
-- Receive feedback on your answers using the STAR framework:
-  - Situation
-  - Task
-  - Action
-  - Result
-- Use candidate context to make interview questions more relevant.
-- Maintain interview state across multiple stages.
-- Evaluate answers and determine the next interview step.
-- Generate a summary or final report when the interview workflow supports completion.
+- **Run Code:** Execute solutions against visible sample test cases for quick debugging.
+- **Submit Code:** Evaluate solutions against hidden test cases managed by the backend.
+- Persist formal verdicts and submission statistics in MongoDB where configured.
+- Normalize supported output values to reduce false negatives caused by formatting or serialization differences.
+- Report execution time and memory information when provided by the execution service.
+- Combine execution results with AI-generated time and space complexity feedback.
 
-The interview workflow uses LangGraph to coordinate application logic and state transitions. Gemini provides the underlying language-model capabilities.
+#### AI problem generation and validation
 
-### 3. Resume Reviewer and Contextual RAG
+AI-generated coding challenges can be inconsistent, so PrepAI includes validation and recovery mechanisms.
 
-Use resume information to support personalized feedback and interview preparation.
+- Generate problems based on topic, difficulty, and supported criteria.
+- Validate generated problems against their reference solutions and test cases.
+- Attempt constrained repair when a generated reference solution fails validation.
+- Fall back to curated, pre-verified problem blueprints when repair fails.
 
-- Upload a resume in PDF format.
-- Extract text and divide it into manageable chunks.
-- Generate embeddings for semantic retrieval.
-- Store and retrieve relevant vectors using Qdrant.
-- Retrieve relevant resume information when constructing contextual AI responses.
-- Connect candidate experience, projects, and technical skills to interview preparation.
+The aim is to avoid presenting every AI-generated problem as correct without verification.
 
-The purpose of retrieval-augmented generation (RAG) is to provide the model with relevant source information rather than relying entirely on a generic prompt or sending an entire document on every request.
+#### 🤖 Pepe AI DSA Coach
 
-### 4. Contextual User Memory
+PrepAI includes a conversational Pepe AI Coach integrated directly into the DSA Arena, helping users learn concepts, generate coding problems, and improve their problem-solving skills without leaving the coding workspace.
 
-PrepAI 2.0 is designed to support personalization across interview sessions.
+- **Chat-Based Problem Generation:** Ask Pepe to generate DSA problems through chat based on a requested topic or practice need.
+- **Progressive Hints:** Request hints step by step to discover the solution approach without immediately revealing the complete answer.
+- **Concept Clarification:** Discuss data structures, algorithms, and problem-solving techniques to strengthen conceptual understanding.
+- **Problem-Solving Guidance:** Get assistance with understanding problem statements, exploring solution approaches, and analyzing edge cases.
+- **Personalized Practice:** Focus on weaker topics and request practice aligned with individual learning goals.
+- **Study Plan Management:** Create or update a study plan and review the existing plan directly through the coaching interface.
 
-Depending on the memory features enabled in the current implementation, useful context can include:
+The Pepe AI DSA Coach complements the CodeMirror editor, OnlineCompiler-powered code execution, and AI-assisted evaluation. It supports conversational learning and guided problem-solving, while code execution and formal submission handle testing and grading separately.
 
-- Areas where a candidate needs improvement.
-- Previous interview responses and evaluation results.
-- Recurring technical weaknesses.
-- Candidate skills, projects, and technology preferences.
+### 2. 💬 Pepe Behavioral Interview Coach
 
-The intended approach is to retrieve relevant, bounded context rather than inject every stored memory into every AI request.
+Practice structured interviews with Pepe, PrepAI's AI coach.
 
-### 5. Company-Specific DSA Question Catalog
+#### Stateful, multi-stage interviews
 
-PrepAI includes a company-specific question catalog based on public community-maintained datasets.
+- Conduct a structured interview across approximately four to five stages.
+- Cover introductions, technical and professional fundamentals, applied problem-solving, situational or behavioral questions, and wrap-up.
+- Maintain workflow state across multiple questions and candidate responses.
+- Use LangGraph to coordinate interview stages, evaluate answers, and choose the next transition.
+- Pause the workflow while waiting for a candidate response and resume it when the answer is submitted.
 
-The catalog workflow includes:
+#### STAR-based answer evaluation
 
-- Importing question metadata from upstream repositories.
-- Normalizing company aliases and problem URLs.
-- Deduplicating questions.
-- Storing catalog records in MongoDB.
-- Retrieving relevant company questions through the backend.
-- Maintaining synchronization history where configured.
+Evaluate behavioral answers using the STAR framework:
 
-Upstream sources:
+- **Situation:** What was happening?
+- **Task:** What responsibility or challenge did the candidate have?
+- **Action:** What did the candidate do?
+- **Result:** What outcome followed?
+
+Feedback can include granular scores, missing details, suggested improvements, and areas to develop.
+
+#### Adaptive interview difficulty
+
+The interview workflow can adjust question difficulty according to the candidate's performance and current interview state.
+
+- Choose an appropriate level of difficulty: Easy, Medium, or Hard.
+- Use previous responses and evaluation results to guide subsequent questions.
+- Ask follow-up questions or adjust the challenge level when the workflow determines that more or less difficulty is appropriate.
+- Maintain stage progression instead of relying entirely on a single, unstructured conversation prompt.
+
+#### Final interview report
+
+At the end of a completed interview, generate a consolidated evaluation covering areas such as:
+
+- Communication clarity.
+- Ownership and decision-making.
+- Problem-solving approach.
+- Strengths and improvement areas.
+- Recommended preparation priorities.
+
+#### Voice and audio experience
+
+The Coach includes browser-based speech and audio features.
+
+- Web Audio API waveform visualization that responds to microphone input.
+- Audio visualization that settles when the microphone is quiet.
+- Speech-to-text support with transcript accumulation to preserve earlier recognized text when speech recognition pauses.
+- Browser-provided speech synthesis voices, with voice selection adapted to the available platform voices.
+- Animated Pepe expressions and speech-related visual feedback where supported.
+
+Available voices depend on the browser and operating system.
+
+### 3. 📄 Resume Reviewer and Role-Based ATS Feedback
+
+Analyze a resume against a candidate's intended role and provide actionable feedback.
+
+#### Resume analysis
+
+- Upload resumes in PDF format.
+- Extract text from multi-page documents.
+- Review resume content for clarity, action verbs, and measurable achievements.
+- Evaluate how effectively the candidate communicates projects, skills, experience, and impact.
+- Produce an ATS-oriented score and recommendations through the configured AI review workflow.
+
+#### Role-based feedback
+
+Use the selected target role to focus feedback on relevant skills and experience.
+
+The goal is to identify gaps between the resume and the expectations of the intended role, instead of giving every candidate the same generic recommendations.
+
+ATS scores are AI-generated estimates, not guarantees of how a particular employer's applicant tracking system will rank a resume.
+
+#### Resume RAG pipeline
+
+Resume content can also be indexed for semantic retrieval, allowing the interview workflow to retrieve relevant projects and technical skills when generating personalized questions.
+
+- Extract and chunk resume text.
+- Generate vector embeddings.
+- Index chunks in Qdrant.
+- Associate vectors with document identifiers.
+- Retrieve relevant chunks for contextual interview generation.
+
+### 4. 🧠 Adaptive Intelligence and Persistent Memory
+
+PrepAI supports adaptive practice at both the coding and interview levels.
+
+#### Adaptive DSA difficulty
+
+- Track coding performance and submission outcomes.
+- Use streaks, attempts, and hint usage where available.
+- Increase difficulty after sustained success.
+- Provide easier challenges or additional guidance when a candidate struggles.
+- Avoid repeatedly serving the same problem during a study session.
+
+A bounded in-memory session cache can track recently used problem blueprints, topics, and titles to reduce repetition.
+
+#### Cross-session memory
+
+Useful candidate information can be retained for later sessions.
+
+Examples include:
+
+- Weak DSA topics.
+- Previous interview answers and scores.
+- Recurring communication or problem-solving weaknesses.
+- Preferred technologies and areas of interest.
+
+Long-term user memory is stored in MongoDB where implemented, while the interview workflow uses its own state and checkpointing mechanism.
+
+At a new interview, relevant memories can be retrieved and included in the context. The intention is to retrieve useful information rather than send every stored memory to the model on every request.
+
+### 5. 🏢 Company-Specific DSA Question Catalog
+
+PrepAI maintains a catalog of company-tagged coding questions sourced from community-maintained repositories.
+
+Source repositories:
 
 - [leetcode-companywise-interview-questions](https://github.com/snehasishroy/leetcode-companywise-interview-questions)
 - [leetcode-company-wise-problems](https://github.com/liquidslr/leetcode-company-wise-problems)
 
-Please review each upstream repository's licensing and attribution requirements before redistributing its data.
+#### Catalog ingestion and synchronization
+
+- Import public question metadata from configured sources.
+- Normalize company aliases, problem URLs, and slugs.
+- Deduplicate records using a canonical problem/company key.
+- Store catalog records in MongoDB.
+- Track synchronization outcomes and failures where configured.
+- Use a scheduled GitHub Actions workflow for recurring synchronization.
+
+#### Finding relevant questions
+
+- Filter questions by company and frequency tier.
+- Retrieve relevant company questions through the backend.
+- Provide links to the original problem pages.
+- Attribute community sources appropriately.
+
+The upstream repositories are community-maintained and are not official LeetCode datasets. Review their licensing terms before redistributing their data or content.
+
+### 6. 📊 Dashboard, Analytics, and Learning Progress
+
+PrepAI provides a dashboard for tracking preparation activity and reviewing progress.
+
+- **Activity heatmap:** Visualize practice activity over time.
+- **Daily streaks:** Encourage consistent preparation.
+- **Topic and difficulty breakdown:** Review coding performance across areas such as arrays, trees, graphs, and dynamic programming.
+- **Performance charts:** Display relevant practice metrics using Recharts.
+- **Personalized study plans:** Generate structured plans based on target roles, experience levels, and interview timelines where supported.
+- **Recent submissions:** Review past code submissions, verdicts, execution statistics, and code history where available.
+
+These features help candidates understand what they have practiced and where additional preparation may be useful.
+
+### 7. 🎨 UI, Pepe Mascot, and Theming
+
+PrepAI includes a dark interface with emerald and cyan accents, a custom Pepe mascot, and personalization options.
+
+#### Animated Pepe robot
+
+- SVG-based mascot rendering.
+- Reactive facial states such as thinking, happy, celebrating, and speaking where supported.
+- Reusable mascot assets across the Coach interface and floating widget.
+- Voice-related visual feedback.
+
+#### Wallpaper personalization
+
+- Eight curated wallpaper choices: Morning Lake, Aurora Night, Snow Peak, Misty Forest, Moonlight Serenade, Dreamy Horizon, Cosmic Nebula, and Dark Abstract.
+- Support for uploading custom wallpapers.
+- Custom images stored in client-side IndexedDB.
+- Separate tracking of the active wallpaper and the saved custom wallpaper preview.
+- Account-scoped settings based on Clerk user identity where configured.
+- Object URL lifecycle management to avoid unnecessary browser memory usage.
+
+#### Responsive interface
+
+- Mobile navigation and touch-friendly controls.
+- Floating Coach positioning designed to handle mobile viewport changes.
+- Responsive coding, coaching, resume, dashboard, and settings pages.
+- A customized Clerk sign-in appearance with PrepAI branding.
+
+### 8. 🛡️ Infrastructure, Reliability, and Security
+
+#### Three-service architecture
+
+The application separates the frontend, application backend, and AI workflows:
+
+- React and Vite frontend.
+- Node.js and Express application backend.
+- Python and FastAPI AI service.
+
+#### Service-to-service security
+
+- The Node.js backend calls the Python AI service through a configured service URL.
+- Protected service requests use the `x-internal-service-key` header.
+- A shared secret is configured on the server side and must never be exposed to the frontend.
+
+#### Gemini quota handling
+
+The project includes a configured Gemini failover path for supported quota-exhaustion cases.
+
+Where enabled, the implementation can recognize certain primary-project quota failures and use a configured fallback project after a cooldown. The exact failure conditions depend on the implemented classifier and service configuration.
+
+#### Backend reliability
+
+- Timeout handling for requests to the AI service.
+- More structured error propagation and diagnostics for upstream failures.
+- Multi-tier rate limiting for selected API categories.
+- Request deduplication and short-lived caching for eligible frontend API calls.
+- User-scoped cache keys where configured.
+- Credential redaction in relevant logs and scripts.
+- Windows DNS-resolution handling for MongoDB Atlas SRV lookups.
+
+These mechanisms improve diagnosability and resilience, but they do not eliminate all service failures or guarantee uninterrupted AI availability.
 
 ---
 
 ## 🏗️ Architecture
 
-PrepAI 2.0 separates the user interface, application backend, and AI workflows into distinct services.
-
-| Component | Responsibility |
-|---|---|
-| React frontend | User interface, coding environment, interview experience, and client-side interactions |
-| Node.js and Express | Application APIs, authentication integration, business logic, and database operations |
-| Python and FastAPI | AI-related APIs, document processing, vector operations, and interview workflow integration |
-| LangGraph | Interview state and workflow orchestration |
-| Gemini | Language-model generation, evaluation, and embedding operations where configured |
-| MongoDB Atlas | Application records and structured data |
-| Qdrant | Vector storage and semantic retrieval |
-| Clerk | Authentication and session management |
+PrepAI 2.0 separates the application interface, backend business logic, and AI workflow execution.
 
 ### High-level architecture
 
 ```mermaid
 flowchart TD
-    User[Candidate]
-    Frontend[React and Vite Frontend]
-    Backend[Node.js and Express Backend]
-    AI[Python and FastAPI AI Service]
-    Graph[LangGraph Interview Workflow]
-    Gemini[Google Gemini APIs]
-    Mongo[(MongoDB Atlas)]
-    Qdrant[(Qdrant Vector Database)]
-    Clerk[Clerk Authentication]
+    User["Candidate"]
+    Client["React 19 and Vite Frontend"]
+    Clerk["Clerk Authentication"]
+    API["Node.js and Express Backend"]
+    Compiler["OnlineCompiler API"]
+    AI["Python and FastAPI AI Service"]
+    Graph["LangGraph Interview Workflow"]
+    Gemini["Google Gemini APIs"]
+    Mongo[("MongoDB Atlas")]
+    Qdrant[("Qdrant Cloud")]
 
-    User --> Frontend
-    Frontend --> Backend
-    Frontend -.-> Clerk
-    Backend --> Mongo
-    Backend --> AI
+    User --> Client
+    Client --> API
+    Client -.-> Clerk
+    API --> Mongo
+    API --> Compiler
+    API --> AI
+    API -.-> Gemini
     AI --> Graph
     AI --> Gemini
     AI --> Qdrant
     Graph --> Gemini
     Graph --> Qdrant
-    Backend -.-> Clerk
 ```
 
-The diagram represents the logical architecture. The exact request path depends on the feature: for example, some application operations are handled by Node.js, while AI workflows are delegated to the Python service.
-
----
-
-## 🧠 How It Works
+The diagram shows the logical service boundaries. The precise path varies by feature: application operations are handled by the backend, while AI workflows and vector retrieval are delegated to the services responsible for those tasks.
 
 ### Behavioral interview workflow
 
-LangGraph coordinates the interview workflow rather than replacing the language model or application backend.
+```mermaid
+flowchart TD
+    Start["Start Interview"]
+    Init["Initialize Interview State"]
+    Context["Load Relevant Candidate Context"]
+    Question["Generate Stage-Appropriate Question"]
+    Wait["Wait for Candidate Answer"]
+    Evaluate["Evaluate Answer with STAR Criteria"]
+    Adapt["Update Interview State and Difficulty"]
+    Complete{"All Interview Stages Complete?"}
+    FollowUp["Choose Next Question or Follow-up"]
+    Report["Generate Final Interview Report"]
+    Memory["Persist Relevant Long-Term Learnings"]
+    Checkpoint[("Interview State Checkpoint")]
+
+    Start --> Init
+    Init --> Context
+    Context --> Question
+    Question --> Wait
+    Wait --> Evaluate
+    Evaluate --> Adapt
+    Adapt --> Checkpoint
+    Adapt --> Complete
+    Complete -- No --> FollowUp
+    FollowUp --> Question
+    Complete -- Yes --> Report
+    Report --> Memory
+```
+
+LangGraph coordinates state, transitions, and resumable interview steps. Gemini handles the language-model operations. Candidate memory and workflow checkpoint state serve different purposes: long-term learning context is stored separately from the state required to resume an interview.
+
+### Resume RAG and ATS analysis pipeline
 
 ```mermaid
 flowchart TD
-    A[Start Interview] --> B[Initialize Interview State]
-    B --> C[Load Relevant Candidate Context]
-    C --> D[Generate Interview Question]
-    D --> E[Wait for Candidate Answer]
-    E --> F[Evaluate Answer]
-    F --> G{Interview Complete?}
-    G -- No --> H[Select Next Question or Follow-up]
-    H --> E
-    G -- Yes --> I[Generate Final Feedback]
-    I --> J[Persist Relevant Results]
+    Upload["Resume PDF Upload"]
+    Backend["Node.js Backend"]
+    AI["Python FastAPI Service"]
+    Extract["Extract Resume Text"]
+    Chunk["Split Text into Overlapping Chunks"]
+    Embed["Generate Vector Embeddings"]
+    Store[("Qdrant Vector Collection")]
+    ATS["Role-Based Resume Analysis"]
+    Feedback["ATS-Oriented Score and Feedback"]
+    Query["Interview Context Query"]
+    QueryEmbed["Embed Query"]
+    Search["Retrieve Relevant Resume Chunks"]
+    Context["Relevant Candidate Context"]
+    Gemini["Gemini Response Generation"]
+    Questions["Personalized Interview Questions"]
+
+    Upload --> Backend
+    Backend --> AI
+    AI --> Extract
+    Extract --> ATS
+    ATS --> Feedback
+    Extract --> Chunk
+    Chunk --> Embed
+    Embed --> Store
+    Query --> QueryEmbed
+    QueryEmbed --> Search
+    Store --> Search
+    Search --> Context
+    Context --> Gemini
+    Gemini --> Questions
 ```
 
-At a high level, the workflow:
+The ATS review and RAG retrieval are related but distinct operations. The review produces resume feedback, while vector retrieval provides relevant candidate context to downstream AI workflows.
 
-1. Initializes the interview session.
-2. Retrieves relevant candidate information where configured.
-3. Generates a question appropriate to the current stage.
-4. Waits for the candidate's response.
-5. Evaluates the answer and updates interview state.
-6. Continues with another question or follow-up when appropriate.
-7. Produces a final report when the interview is complete.
+---
 
-This separation makes interview progression easier to reason about than a single, unstructured prompt containing the entire conversation.
+## 🛠️ Technology Stack
 
-### Resume RAG pipeline
-
-```mermaid
-flowchart TD
-    A[Resume PDF] --> B[Text Extraction]
-    B --> C[Text Chunking]
-    C --> D[Embedding Generation]
-    D --> E[(Qdrant Vector Storage)]
-    F[Interview or Resume Query] --> G[Query Embedding]
-    G --> H[Semantic Retrieval]
-    E --> H
-    H --> I[Relevant Context]
-    I --> J[Gemini Response Generation]
-    J --> K[Contextual Feedback]
-```
-
-The general pipeline consists of:
-
-1. Extracting text from the uploaded document.
-2. Splitting the extracted content into chunks.
-3. Generating vector embeddings.
-4. Storing vectors with the metadata needed for retrieval.
-5. Embedding a query and retrieving relevant chunks.
-6. Passing the retrieved context to the model to help generate a grounded response.
-
-The exact embedding model, chunk size, overlap, filtering strategy, and vector dimensions should match the current service configuration.
-
-### Structured data versus vector data
-
-MongoDB and Qdrant serve different purposes.
-
-| MongoDB Atlas | Qdrant |
+| Layer | Technologies |
 |---|---|
-| Application and user records | Vector embeddings |
-| Structured interview and progress data where implemented | Semantic similarity search |
-| Resume metadata and document references where implemented | Chunk vectors and retrieval metadata |
-| Catalog records and synchronization logs where configured | Vector collections and payload filters |
+| Frontend | React 19, Vite, Tailwind CSS, CodeMirror, Axios |
+| Authentication | Clerk |
+| Application backend | Node.js, Express, Mongoose |
+| Application database | MongoDB Atlas |
+| AI service | Python, FastAPI, Uvicorn, Pydantic |
+| Workflow orchestration | LangGraph |
+| Language model | Google Gemini |
+| Vector database | Qdrant Cloud |
+| Code execution | OnlineCompiler API |
+| Charts and visualizations | Recharts |
+| Icons and animation | Lucide, Framer Motion where used |
+| Testing | Frontend tests, Node.js regression/integration tests, Python tests |
+| Deployment | Vercel and Render |
 
-Keeping these responsibilities separate makes application data easier to manage while allowing the AI service to perform semantic retrieval.
-
----
-
-## 🛠️ Engineering Decisions
-
-### 1. Separate application logic from AI workflows
-
-The Node.js backend remains responsible for application APIs and business logic. Python/FastAPI provides a dedicated environment for AI processing and orchestration.
-
-This allows each service to evolve independently, but it also introduces network boundaries, service configuration, and additional failure modes.
-
-### 2. Use LangGraph for workflow orchestration
-
-Multi-stage interviews require explicit state, conditional transitions, and a way to continue after a candidate submits an answer.
-
-LangGraph provides a graph-based approach to coordinating these steps. Gemini remains responsible for language generation and evaluation; LangGraph coordinates when those operations happen.
-
-### 3. Retrieve relevant context instead of sending everything
-
-RAG allows the system to retrieve relevant resume content or other supported knowledge before generating a response.
-
-This can reduce unnecessary context and help ground responses in source material. Retrieval quality still depends on chunking, embeddings, filters, and the quality of the original document.
-
-### 4. Keep structured application data separate from vector retrieval
-
-MongoDB stores application data, while Qdrant handles vector search. This separation gives each storage system a clearer responsibility.
-
-It also means the application must coordinate document identifiers, access control, updates, and cleanup across both systems.
-
-### 5. Treat AI output as untrusted until validated
-
-AI-generated coding problems and feedback can be incorrect. Validation, structured response handling, error handling, and tests help catch failures before they reach users.
-
-Similarly, service-to-service requests need explicit timeouts and authentication, and upstream failures should be distinguishable from application errors.
+Package versions can change; the `package.json` files and Python dependency files are the source of truth.
 
 ---
 
-## 💻 Technology Stack
+## 🧩 Engineering Decisions
 
-### Frontend
+### Why separate Node.js and Python?
 
-- [React](https://react.dev/)
-- [Vite](https://vite.dev/)
-- [Tailwind CSS](https://tailwindcss.com/)
-- [CodeMirror](https://github.com/uiwjs/react-codemirror)
-- [Axios](https://axios-http.com/)
-- [Clerk](https://clerk.com/)
-- [Lucide](https://lucide.dev/)
+Node.js and Express retain application routes, authentication integration, user data, coding workflows, and established business logic. Python/FastAPI handles AI-specific processing and workflow execution.
 
-### Application backend
+This separation makes it possible to evolve the AI service independently without moving the entire application backend. The trade-off is additional network boundaries, configuration, and cross-service error handling.
 
-- [Node.js](https://nodejs.org/)
-- [Express](https://expressjs.com/)
-- [MongoDB Atlas](https://www.mongodb.com/atlas)
-- [Mongoose](https://mongoosejs.com/)
-- [Google Gemini SDK for Node.js](https://www.npmjs.com/package/@google/generative-ai), where used by the existing backend
+### Why LangGraph?
 
-### AI service
+A multi-stage interview needs explicit state and conditional transitions. LangGraph coordinates the interview workflow, manages pauses while waiting for candidate responses, and determines what should happen next.
 
-- [Python](https://www.python.org/)
-- [FastAPI](https://fastapi.tiangolo.com/)
-- [Uvicorn](https://www.uvicorn.org/)
-- [Google Gen AI SDK](https://googleapis.github.io/python-genai/)
-- [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)
-- [Qdrant](https://qdrant.tech/)
-- [Pydantic](https://docs.pydantic.dev/)
+It does not replace Gemini or the application's business logic.
 
-### Testing and observability
+### Why use RAG?
 
-The project includes frontend and backend test suites, with Python tests for the AI service. The exact commands and coverage depend on the current repository configuration.
+Resume retrieval lets the application provide relevant evidence from a candidate's resume when generating questions or feedback. It avoids relying solely on generic prompts and can reduce the amount of unrelated context sent to the model.
+
+RAG quality still depends on extraction, chunking, embeddings, and retrieval filters.
+
+### Why use both MongoDB and Qdrant?
+
+MongoDB stores application and structured data. Qdrant stores vectors and supports similarity search.
+
+The application must coordinate identifiers and lifecycle management so that document metadata, user access, and vector records remain consistent.
+
+### Why use an external code execution service?
+
+Running arbitrary user-submitted code requires careful isolation. PrepAI delegates code execution to the configured OnlineCompiler API instead of implementing its own language runtime.
+
+The backend controls the execution workflow and manages formal evaluation. The execution provider, its limits, and its isolation guarantees remain external dependencies.
 
 ---
 
 ## 📂 Repository Structure
 
-The following is a high-level view of the project. Refer to the repository itself for the complete and current file tree.
+The following tree describes the high-level service layout. Refer to the actual repository for the full file structure.
 
 ```text
 PrepAI/
@@ -340,25 +496,22 @@ PrepAI/
 └── README.md
 ```
 
-Some directories or files may differ between branches. This tree is intended to explain the main service boundaries, not replace repository inspection.
-
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-Install the tools required by the services you intend to run:
-
-- Node.js and npm.
-- Python and `pip`.
-- A MongoDB Atlas database or another supported MongoDB instance.
-- A Qdrant Cloud cluster or a compatible local Qdrant instance.
-- A Google Gemini API key.
-- A Clerk application if authentication is enabled.
 - Git.
+- Node.js and npm versions compatible with the project.
+- Python and pip.
+- MongoDB Atlas or another supported MongoDB deployment.
+- Qdrant Cloud or a compatible local Qdrant instance.
+- A Google Gemini API key.
+- Clerk configuration if authentication is enabled.
+- OnlineCompiler API credentials if required by the selected execution service.
 
-Docker is useful if your local setup uses containerized dependencies.
+Docker may be useful for local dependencies where the project provides a Compose configuration.
 
 ### 1. Clone the repository
 
@@ -367,17 +520,18 @@ git clone <YOUR_GITHUB_REPOSITORY_URL>
 cd PrepAI
 ```
 
-Replace the placeholder with the actual repository URL.
+Replace the placeholder with your repository's actual URL.
 
-### 2. Start the Python AI service
+### 2. Run the Python AI service
+
+Open a terminal:
 
 ```bash
 cd ai-services
-
 python -m venv .venv
 ```
 
-Activate the virtual environment.
+Activate the environment.
 
 **Windows PowerShell:**
 
@@ -391,52 +545,54 @@ Activate the virtual environment.
 source .venv/bin/activate
 ```
 
-Install the dependencies:
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Configure the environment variables described in the service's `.env.example`, if provided.
+Configure the required values using the service's `.env.example`, if provided. Do not commit the resulting `.env` file.
 
-Start the service using the project's configured entry point. The previously used local command is:
+Start the service with the project's configured entry point. The previously used local command is:
 
 ```bash
 uvicorn app.main:app --reload --port 9000
 ```
 
-If the application uses a health endpoint, verify it at the corresponding local URL.
+If the health endpoint is enabled, test:
 
-### 3. Start the Node.js backend
+```text
+http://localhost:9000/health
+```
 
-Open a separate terminal:
+### 3. Run the Node.js backend
+
+In a separate terminal:
 
 ```bash
 cd server
 npm install
 ```
 
-Configure the backend environment variables using the provided example configuration.
+Configure the backend's required environment variables.
 
-Start the backend using the development script defined in `server/package.json`. For example, if the project defines `dev`:
+Start the backend using the script defined in `server/package.json`. If the repository defines the `dev` script:
 
 ```bash
 npm run dev
 ```
 
-The backend has commonly used port `5000` in local development. Confirm the actual port from the configuration and startup logs.
+The backend has commonly used port `5000` in local development. Confirm the active port from the application configuration and startup logs.
 
-### 4. Start the React frontend
+### 4. Run the frontend
 
-Open another terminal:
+In another terminal:
 
 ```bash
 cd client
 npm install
 npm run dev
 ```
-
-Vite has commonly used port `5173` for this project.
 
 Open the URL printed by Vite, typically:
 
@@ -444,117 +600,115 @@ Open the URL printed by Vite, typically:
 http://localhost:5173
 ```
 
-### Local development notes
+### Local service connections
 
-- Ensure the frontend API base URL points to the local Node.js backend.
-- Ensure the Node.js backend points to the local Python AI service.
-- Configure matching service authentication secrets where required.
-- Ensure MongoDB, Qdrant, and Gemini configuration is valid before testing dependent features.
-- If a service fails to start, inspect its logs before changing configuration or code.
+Confirm that:
 
-The exact scripts, ports, and required environment variables must match the current branch.
+- The frontend API base URL points to the Node.js backend.
+- The Node.js backend points to the Python AI service.
+- The Node.js and Python service secrets match.
+- MongoDB, Qdrant, Gemini, Clerk, and OnlineCompiler credentials are configured where required.
+- The configured vector size matches the embedding model used by the AI service.
 
 ---
 
 ## 🔐 Environment Configuration
 
-Never commit real credentials, API keys, database connection strings, or service secrets.
+Never commit real API keys, database credentials, service secrets, or `.env` files.
 
-Use the example configuration files supplied with the project. The following table lists variables discussed during development; verify the actual names and requirements against each service's configuration before using them.
+The following are variables discussed during development. Check the current configuration code and `.env.example` files to confirm exact names and required status.
 
 | Variable | Service | Purpose |
 |---|---|---|
-| `VITE_CLERK_PUBLISHABLE_KEY` | Frontend | Public Clerk publishable key, if used by the current client |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Frontend | Public Clerk publishable key |
 | `VITE_API_BASE_URL` | Frontend | Base URL for the Node.js API, if configured |
 | `VITE_POSTHOG_KEY` | Frontend | Optional analytics project key |
 | `VITE_POSTHOG_HOST` | Frontend | Analytics ingestion host |
+| `CLERK_PUBLISHABLE_KEY` | Backend | Clerk publishable configuration, if required |
 | `CLERK_SECRET_KEY` | Backend | Private Clerk server credential |
 | `DATABASE_URL` or `MONGODB_URI` | Backend | MongoDB connection string; use the name actually read by the application |
-| `AI_SERVICE_URL` | Backend | Base URL for the Python AI service |
-| `AI_SERVICE_SECRET` | Backend and AI service | Shared service-to-service authentication secret |
-| `AI_SERVICE_TIMEOUT_MS` | Backend | Timeout for AI-service requests, if supported |
-| `GEMINI_API_KEY` | Backend or AI service | Gemini API credential for the operations handled by that service |
+| `AI_SERVICE_URL` | Backend | Base URL of the Python AI service |
+| `AI_SERVICE_SECRET` | Backend and AI service | Shared secret for protected service-to-service requests |
+| `AI_SERVICE_TIMEOUT_MS` | Backend | AI request timeout, if configured |
+| `GEMINI_API_KEY` | Backend or AI service | Gemini API credential |
+| `GEMINI_FALLBACK_API_KEY` | Backend or AI service | Optional fallback credential where implemented |
+| `GEMINI_FAILOVER_ENABLED` | Backend or AI service | Enables supported quota failover logic |
 | `QDRANT_URL` | AI service | Qdrant endpoint |
-| `QDRANT_API_KEY` | AI service | Qdrant authentication credential when required |
+| `QDRANT_API_KEY` | AI service | Qdrant credential when required |
 | `QDRANT_COLLECTION` | AI service | Vector collection name, if configurable |
-| `LANGSMITH_TRACING` | AI service | Optional LangSmith tracing setting, if integrated |
+| `QDRANT_VECTOR_SIZE` | AI service | Configured vector dimension, if configurable |
+| `ONLINECOMPILER_API_KEY` | Backend | Remote code execution API credential, if required |
+| `TEST_CASE_ENCRYPTION_KEY` | Backend | Key for hidden test-case protection, if configured |
+| `MONGODB_DNS_SERVERS` | Backend | Optional DNS resolver configuration |
+| `TRUST_PROXY` | Backend | Express proxy-trust setting, if supported |
+| `LANGSMITH_TRACING` | AI service | Optional LangSmith tracing configuration |
 
-### Configuration guidelines
+**Important configuration rules:**
 
-- Frontend variables prefixed with `VITE_` are exposed in the browser bundle. They must never contain private secrets.
-- Backend and AI-service credentials must remain server-side.
-- If both services use `AI_SERVICE_SECRET`, their configured values must match.
+- Frontend `VITE_` variables are exposed to the browser. Never store private secrets in them.
+- Keep backend and AI-service credentials server-side.
+- Ensure `AI_SERVICE_SECRET` matches across the two services.
 - Use HTTPS for deployed service endpoints.
-- Avoid logging credentials or full authentication headers.
-- Check `.env.example` files and configuration code to establish which variables are mandatory.
-
-Do not copy example placeholders into a real deployment without replacing them with valid configuration values.
+- Avoid logging API keys, authentication headers, resume text, or private candidate data.
 
 ---
 
 ## 🧪 Testing
 
-Run the tests defined by each service's current configuration.
+Run tests from the relevant service directory.
 
-### Frontend
+### Frontend tests and build
 
 ```bash
 cd client
 npm test
-```
-
-Build the production bundle:
-
-```bash
 npm run build
 ```
 
-### Node.js backend
+### Node.js backend tests
 
 ```bash
 cd server
 node tests/run-all-tests.js
 ```
 
-Use this command if `tests/run-all-tests.js` exists in the current branch. Otherwise, follow the scripts defined in `server/package.json`.
+Use this command if `tests/run-all-tests.js` exists in the current branch; otherwise, follow the scripts in `server/package.json`.
 
-### Python AI service
+### Python AI-service tests
 
-Activate the Python virtual environment, then run the test command supported by the repository.
-
-For a project using `unittest`:
+If the project uses Python's `unittest`:
 
 ```bash
+cd ai-services
 python -m unittest discover tests
 ```
 
-For a project configured for `pytest`:
+If the current branch uses pytest instead:
 
 ```bash
 pytest tests/
 ```
 
-Use the test framework actually configured by the current branch.
+Use the test framework actually configured by the repository.
 
-### What to verify
+### Important test areas
 
-- Frontend rendering and navigation.
-- Backend API behavior and error handling.
-- Authentication and service-to-service requests.
-- Interview workflow transitions.
-- Resume processing and retrieval.
-- Vector collection configuration and retrieval filters.
-- AI failure handling and timeout behavior.
+- DSA problem generation, validation, and repair.
+- Code execution and formal submission evaluation.
+- Interview state transitions and adaptive difficulty.
+- Resume extraction, ATS feedback, and vector retrieval.
+- Service authentication, timeouts, and upstream failure handling.
+- Wallpaper, voice, and mobile UI behavior.
 
-A successful unit test or build does not automatically verify the complete deployed system. End-to-end behavior should be tested separately.
+Passing unit tests does not by itself establish complete end-to-end correctness. Verify the workflows against the configured services as well.
 
 ---
 
 ## 🌐 Deployment
 
-The previously configured deployment topology uses:
+The deployment topology previously configured for PrepAI is:
 
-| Service | Platform |
+| Component | Platform |
 |---|---|
 | React frontend | Vercel |
 | Node.js backend | Render |
@@ -562,72 +716,73 @@ The previously configured deployment topology uses:
 | Application database | MongoDB Atlas |
 | Vector database | Qdrant Cloud |
 
-Previously used deployment addresses:
+The primary user-facing application is:
 
-- Frontend: https://prepai-app.vercel.app/
-- Node.js backend: https://prepai-backend-rj08.onrender.com
-- Python AI service: https://prepai-ai-service-meda.onrender.com
+- **PrepAI frontend:** https://prepai-app.vercel.app/
 
-These URLs are historical project configuration and should be checked before relying on them.
+The Node.js and Python services have separate deployment URLs configured through environment variables. Their base URLs are service endpoints, not standalone user interfaces, and may return 404 if no root route is implemented.
 
 ### Deployment checklist
 
-1. Configure frontend, backend, and AI-service environment variables independently.
-2. Verify that frontend API requests target the correct backend.
-3. Verify that the backend targets the correct AI service.
+1. Configure the frontend, backend, and AI-service environment variables independently.
+2. Set the frontend API base URL correctly.
+3. Set the backend's `AI_SERVICE_URL` to the intended AI-service deployment.
 4. Configure matching internal service authentication secrets.
-5. Confirm database connectivity and vector collection configuration.
+5. Confirm database and vector-store connectivity.
 6. Verify health endpoints where implemented.
-7. Test the interview, resume, and coding workflows after deployment.
-8. Inspect service logs for timeouts, authentication failures, and upstream AI errors.
+7. Test coding, interview, resume, and authentication workflows.
+8. Review sanitized service logs for timeouts and upstream failures.
+
+Do not put service secrets in the README, source control, or browser environment variables.
 
 ---
 
-## 🛡️ Security Considerations
+## 🛡️ Security and Reliability
 
-Security must be enforced by the implementation, not merely described in documentation.
+PrepAI handles user-submitted code and personal resume data, so security and failure handling matter.
 
-- Keep private API keys and database credentials out of source control.
-- Do not expose backend-only secrets through frontend environment variables.
-- Authenticate application requests using the configured authentication system.
-- Protect internal service requests using the configured authentication mechanism.
-- Validate uploaded documents and request payloads.
-- Apply appropriate access controls to candidate data and resume content.
-- Keep hidden coding test cases on the server side.
-- Avoid logging sensitive candidate information or authentication credentials.
-- Use timeouts and explicit error handling for upstream service calls.
-- Treat AI-generated answers, code, and evaluations as fallible outputs.
+- Keep private credentials out of source control.
+- Protect application routes with the configured authentication middleware.
+- Protect internal AI routes with service authentication.
+- Apply appropriate request validation and rate limiting.
+- Keep hidden test cases out of the client response.
+- Validate uploaded documents and restrict access to candidate data.
+- Do not log credentials, sensitive resume content, or authentication headers.
+- Use request timeouts and actionable error reporting for upstream AI calls.
+- Treat AI-generated code, questions, and evaluations as fallible.
 
-These are important design and maintenance requirements; their actual enforcement depends on the current implementation and deployment configuration.
+The code execution engine depends on the configured OnlineCompiler service. Its availability, API limits, and isolation guarantees are external dependencies.
+
+A publicly accessible service URL is not a secret and does not replace authentication, authorization, or rate limiting.
 
 ---
 
-## 📈 Current Status and Roadmap
+## 📈 Project Status and Roadmap
 
 PrepAI 2.0 is an evolving project.
 
-### Areas of development
+### Main implemented areas
 
-- Multi-service application architecture.
-- Stateful behavioral interview orchestration.
-- Resume processing and vector-based retrieval.
-- Personalized interview context and memory.
-- AI-generated coding challenges and evaluation.
-- Company-specific DSA question catalog.
-- Error handling, regression tests, and deployment reliability.
+- Full-stack React, Node.js, and Python/FastAPI architecture.
+- DSA challenge generation and remote code execution.
+- Coding problem validation and repair mechanisms.
+- Stateful behavioral interview orchestration with LangGraph.
+- Role-based resume analysis and RAG-oriented retrieval.
+- Adaptive practice and persistent candidate context where configured.
+- Company-specific DSA catalog and synchronization workflow.
+- Dashboard analytics, study planning, and personalization features.
+- Regression tests and service error-handling improvements.
 
 ### Potential future improvements
 
-The following are ideas rather than claims of completed functionality:
-
-- More comprehensive interview analytics and progress tracking.
-- Better retrieval evaluation and context-quality measurements.
-- Improved end-to-end testing across all three services.
-- More advanced voice-based interview interactions.
+- More comprehensive retrieval and evaluation benchmarks.
+- Broader end-to-end testing across the services.
+- More detailed learning analytics and interview trend reports.
+- Further improvements to voice-based interview interaction.
 - System design interview practice.
-- Additional evaluation benchmarks for generated problems and feedback.
+- Better measurements of AI-generated problem and feedback quality.
 
-The roadmap may change as implementation and testing progress.
+Roadmap items may change as implementation and testing progress.
 
 ---
 
@@ -635,7 +790,7 @@ The roadmap may change as implementation and testing progress.
 
 Contributions, bug reports, and constructive feedback are welcome.
 
-### Getting started
+### Contributing workflow
 
 1. Fork the repository.
 2. Create a feature branch:
@@ -644,22 +799,22 @@ Contributions, bug reports, and constructive feedback are welcome.
    git checkout -b feature/your-feature-name
    ```
 
-3. Make a focused change.
+3. Implement a focused change.
 4. Run the relevant tests and build checks.
 5. Confirm that no credentials or `.env` files are included.
-6. Commit your changes with a clear message.
-7. Open a pull request explaining the problem, the solution, and how it was tested.
+6. Commit with a clear message.
+7. Open a pull request describing the problem, solution, and verification steps.
 
 ### Contribution guidelines
 
 - Keep changes focused and easy to review.
-- Preserve existing API contracts unless a change is intentional and documented.
-- Coordinate changes that affect communication between the Node.js and Python services.
-- Include regression tests for bug fixes where practical.
+- Preserve existing API contracts unless changes are intentional and documented.
+- Coordinate changes that affect communication between Node.js and Python.
+- Add regression tests for bug fixes where practical.
 - Document non-obvious architectural decisions.
-- Never commit secrets or private candidate data.
+- Never commit credentials or private candidate data.
 
-For bugs, include reproduction steps, expected behavior, actual behavior, and relevant sanitized logs.
+For bug reports, include reproduction steps, expected and actual behavior, and relevant sanitized logs.
 
 ---
 
@@ -667,8 +822,7 @@ For bugs, include reproduction steps, expected behavior, actual behavior, and re
 
 Developed by **Aman Rawat** as a hands-on project exploring full-stack development, AI integration, retrieval-augmented generation, and stateful AI workflows.
 
-PrepAI is both an interview preparation product and an ongoing engineering project focused on understanding how application services, data retrieval, and AI orchestration fit together.
-
+PrepAI combines interview preparation features with practical engineering work across application services, data retrieval, code execution, and AI orchestration.
 
 ---
 
