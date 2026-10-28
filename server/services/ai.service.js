@@ -239,6 +239,50 @@ export async function extractMemories(
   return parseAiResponse(response, "/extract-memories");
 }
 
+/**
+ * Safe temporary outbound HTTP request executor for /interview/start.
+ * Logs structured diagnostics on request start, response, and transport errors.
+ * Never logs credentials, internal secrets, or request/response bodies.
+ */
+async function fetchStartInterviewWithTracing(endpointPath, fetchOptions, correlationId = "-") {
+  const fullUrl = buildAiServiceUrl(endpointPath);
+  let targetDisplay = endpointPath;
+  try {
+    const parsed = new URL(fullUrl);
+    targetDisplay = `${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    // If URL parsing fails, targetDisplay falls back to endpointPath
+  }
+
+  const startTime = Date.now();
+  console.log(
+    `[AI Outbound START] timestamp=${new Date().toISOString()} correlationId=${correlationId} target=${targetDisplay}`
+  );
+
+  let response;
+  try {
+    response = await fetch(fullUrl, fetchOptions);
+  } catch (err) {
+    const durationMs = Date.now() - startTime;
+    console.error(
+      `[AI Outbound ERROR] timestamp=${new Date().toISOString()} correlationId=${correlationId} target=${targetDisplay} durationMs=${durationMs} failedBeforeResponse=true error=${err?.name || "Error"}: ${err?.message || "Unknown error"}`
+    );
+    throw err;
+  }
+
+  const durationMs = Date.now() - startTime;
+  const serverHeader = response.headers?.get ? (response.headers.get("server") || "-") : "-";
+  const cfRayHeader = response.headers?.get ? (response.headers.get("cf-ray") || "-") : "-";
+  const contentType = response.headers?.get ? (response.headers.get("content-type") || "-") : "-";
+  const retryAfter = response.headers?.get ? (response.headers.get("retry-after") || "-") : "-";
+
+  console.log(
+    `[AI Outbound RESPONSE] timestamp=${new Date().toISOString()} correlationId=${correlationId} target=${targetDisplay} status=${response.status} durationMs=${durationMs} server=${serverHeader} cfRay=${cfRayHeader} contentType="${contentType}" retryAfter=${retryAfter}`
+  );
+
+  return parseAiResponse(response, endpointPath);
+}
+
 export async function startInterview(data, options = {}) {
   const customHeaders = {
     "Content-Type": "application/json",
@@ -249,17 +293,16 @@ export async function startInterview(data, options = {}) {
     customHeaders["x-request-id"] = correlationId;
   }
 
-  const response = await fetch(
-    buildAiServiceUrl("/interview/start"),
+  return fetchStartInterviewWithTracing(
+    "/interview/start",
     {
       method: "POST",
       headers: getInternalHeaders(customHeaders),
       body: JSON.stringify(data),
       signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
-    }
+    },
+    correlationId || "-"
   );
-
-  return parseAiResponse(response, "/interview/start");
 }
 
 export async function submitInterviewAnswer(
