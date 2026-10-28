@@ -1,8 +1,24 @@
-const AI_SERVICE_URL =
-  process.env.AI_SERVICE_URL || "http://localhost:9000";
+export function getAiServiceUrl() {
+  const rawUrl = process.env.AI_SERVICE_URL || "http://localhost:9000";
+  return rawUrl.trim().replace(/\/+$/, "");
+}
+
+export const AI_SERVICE_URL = getAiServiceUrl();
 
 export const AI_SERVICE_TIMEOUT_MS =
   parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 120000;
+
+export class AiServiceError extends Error {
+  constructor(message, { status, endpoint, responseBody, details } = {}) {
+    super(message);
+    this.name = "AiServiceError";
+    this.status = status;
+    this.statusCode = status;
+    this.endpoint = endpoint;
+    this.responseBody = responseBody;
+    this.details = details;
+  }
+}
 
 export function getAiServiceSecret() {
   const secret = process.env.AI_SERVICE_SECRET;
@@ -18,6 +34,32 @@ function getInternalHeaders(customHeaders = {}) {
   const headers = { ...customHeaders };
   headers["x-internal-service-key"] = getAiServiceSecret();
   return headers;
+}
+
+async function parseAiResponse(response, endpoint) {
+  if (response.ok) {
+    return response.json();
+  }
+
+  const errorText = await response.text();
+  let details = null;
+
+  try {
+    details = JSON.parse(errorText);
+  } catch {
+    // Non-JSON response
+  }
+
+  const detailMsg = details?.detail || details?.error || details?.message || errorText;
+  const cleanDetail = detailMsg ? ` - ${typeof detailMsg === "string" ? detailMsg : JSON.stringify(detailMsg)}` : "";
+  const message = `AI service error: ${response.status}${cleanDetail}`;
+
+  throw new AiServiceError(message, {
+    status: response.status,
+    endpoint,
+    responseBody: errorText,
+    details,
+  });
 }
 
 export async function uploadResume(file) {
@@ -37,7 +79,7 @@ export async function uploadResume(file) {
   );
 
   const response = await fetch(
-    `${AI_SERVICE_URL}/upload-pdf`,
+    `${getAiServiceUrl()}/upload-pdf`,
     {
       method: "POST",
       headers: getInternalHeaders(),
@@ -45,17 +87,8 @@ export async function uploadResume(file) {
     }
   );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-
-    throw new Error(
-      `AI service error: ${response.status} ${errorText}`
-    );
-  }
-
-  return response.json();
+  return parseAiResponse(response, "/upload-pdf");
 }
-
 
 export async function retrieveResumeContext(
   query,
@@ -67,21 +100,13 @@ export async function retrieveResumeContext(
   });
 
   const response = await fetch(
-    `${AI_SERVICE_URL}/rag?${params.toString()}`,
+    `${getAiServiceUrl()}/rag?${params.toString()}`,
     {
       headers: getInternalHeaders(),
     }
   );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-
-    throw new Error(
-      `AI service error: ${response.status} ${errorText}`
-    );
-  }
-
-  return response.json();
+  return parseAiResponse(response, "/rag");
 }
 
 export async function generateInterviewResponse(
@@ -94,14 +119,12 @@ export async function generateInterviewResponse(
   memoryContext
 ) {
   const response = await fetch(
-    `${AI_SERVICE_URL}/interview`,
+    `${getAiServiceUrl()}/interview`,
     {
       method: "POST",
-
       headers: getInternalHeaders({
         "Content-Type": "application/json",
       }),
-
       body: JSON.stringify({
         document_id: documentId,
         question,
@@ -114,15 +137,7 @@ export async function generateInterviewResponse(
     }
   );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-
-    throw new Error(
-      `AI service error: ${response.status} ${errorText}`
-    );
-  }
-
-  return response.json();
+  return parseAiResponse(response, "/interview");
 }
 
 export async function extractMemories(
@@ -131,7 +146,7 @@ export async function extractMemories(
   evaluation
 ) {
   const response = await fetch(
-    `${AI_SERVICE_URL}/extract-memories`,
+    `${getAiServiceUrl()}/extract-memories`,
     {
       method: "POST",
       headers: getInternalHeaders({
@@ -145,67 +160,42 @@ export async function extractMemories(
     }
   );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-
-    throw new Error(
-      `AI memory service error: ${response.status} ${errorText}`
-    );
-  }
-
-  return response.json();
+  return parseAiResponse(response, "/extract-memories");
 }
 
 export async function startInterview(data) {
-    const response = await fetch(
-        `${AI_SERVICE_URL}/interview/start`,
-        {
-            method: "POST",
-            headers: getInternalHeaders({
-                "Content-Type": "application/json",
-            }),
-            body: JSON.stringify(data),
-            signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
-        }
-    );
-
-    if (!response.ok) {
-        const errorText = await response.text();
-
-        throw new Error(
-            `AI interview service error: ${response.status} ${errorText}`
-        );
+  const response = await fetch(
+    `${getAiServiceUrl()}/interview/start`,
+    {
+      method: "POST",
+      headers: getInternalHeaders({
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify(data),
+      signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
     }
+  );
 
-    return response.json();
+  return parseAiResponse(response, "/interview/start");
 }
 
-
 export async function submitInterviewAnswer(
-    sessionId,
-    answer
+  sessionId,
+  answer
 ) {
-    const response = await fetch(
-        `${AI_SERVICE_URL}/interview/${sessionId}/answer`,
-        {
-            method: "POST",
-            headers: getInternalHeaders({
-                "Content-Type": "application/json",
-            }),
-            body: JSON.stringify({
-                answer,
-            }),
-            signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
-        }
-    );
-
-    if (!response.ok) {
-        const errorText = await response.text();
-
-        throw new Error(
-            `AI interview service error: ${response.status} ${errorText}`
-        );
+  const response = await fetch(
+    `${getAiServiceUrl()}/interview/${sessionId}/answer`,
+    {
+      method: "POST",
+      headers: getInternalHeaders({
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify({
+        answer,
+      }),
+      signal: AbortSignal.timeout(AI_SERVICE_TIMEOUT_MS),
     }
+  );
 
-    return response.json();
+  return parseAiResponse(response, `/interview/${sessionId}/answer`);
 }

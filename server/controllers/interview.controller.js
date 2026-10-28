@@ -177,7 +177,95 @@ export function buildAdaptiveStagePlan(experienceLevel = "fresher", interviewTyp
     }
 }
 
+/**
+ * Structured diagnostic logger for interview operations.
+ * Never logs credentials, API keys, tokens, or resume contents.
+ */
+function logInterviewDiagnostic({ req, action, durationMs, status, error = null }) {
+    const correlationId =
+        req?.headers?.["x-request-id"] ||
+        req?.headers?.["x-correlation-id"] ||
+        crypto.randomUUID();
+
+    const diagnostic = {
+        timestamp: new Date().toISOString(),
+        correlationId,
+        action,
+        userId: req.user?.id ? String(req.user.id) : "unauthenticated",
+        durationMs,
+        httpStatus: status,
+        ...(error ? {
+            errorName: error.name || "Error",
+            errorMessage: error.message || "Unknown error",
+            upstreamStatus: error.status || error.statusCode || null,
+            upstreamEndpoint: error.endpoint || null,
+            upstreamDetail: error.details?.detail || error.details?.error || null,
+        } : {}),
+    };
+
+    if (status >= 500) {
+        console.error(`[Interview Diagnostic ERROR]`, JSON.stringify(diagnostic));
+    } else if (status >= 400) {
+        console.warn(`[Interview Diagnostic WARN]`, JSON.stringify(diagnostic));
+    } else {
+        console.log(`[Interview Diagnostic INFO]`, JSON.stringify(diagnostic));
+    }
+
+    return correlationId;
+}
+
+function resolveInterviewError(error, defaultMsg, timeoutMsg) {
+    const upstreamStatus = error.status || error.statusCode;
+
+    const isTimeout =
+        error.name === "TimeoutError" ||
+        error.name === "AbortError" ||
+        error.code === 23 ||
+        upstreamStatus === 504 ||
+        error.message?.includes("aborted due to timeout") ||
+        error.message?.includes("timed out");
+
+    const isUnavailable =
+        error.code === "ECONNREFUSED" ||
+        error.message?.includes("ECONNREFUSED") ||
+        error.message?.includes("fetch failed") ||
+        upstreamStatus === 502 ||
+        upstreamStatus === 503;
+
+    const isForbidden =
+        upstreamStatus === 403 ||
+        error.message?.includes("Invalid or missing internal service key") ||
+        error.message?.includes("Forbidden");
+
+    const isNotFound = upstreamStatus === 404;
+
+    let statusCode = 500;
+    let errorMsg = defaultMsg;
+
+    if (isTimeout) {
+        statusCode = 504;
+        errorMsg = timeoutMsg || "The AI workflow timed out. Please try again.";
+    } else if (isUnavailable) {
+        statusCode = 503;
+        errorMsg = "AI interview service is temporarily unavailable or waking up. Please try again shortly.";
+    } else if (isForbidden) {
+        statusCode = 502;
+        errorMsg = "AI service communication error: service authentication failure. Please check server configuration.";
+    } else if (isNotFound) {
+        statusCode = 502;
+        errorMsg = "AI service communication error: interview endpoint not found. Please verify service configuration.";
+    } else if (upstreamStatus === 500) {
+        statusCode = 502;
+        errorMsg = error.details?.detail || error.message || "Upstream AI service encountered an error.";
+    } else if (error.message) {
+        errorMsg = error.message;
+    }
+
+    return { statusCode, errorMsg, isTimeout };
+}
+
 export async function startInterviewController(req, res) {
+    const startTime = Date.now();
     try {
         if (!req.user || !req.user.id) {
             return res.status(401).json({
@@ -317,6 +405,8 @@ Requirements:
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
 
+        logInterviewDiagnostic({ req, action: "startInterview", durationMs: Date.now() - startTime, status: 200 });
+
         return res.status(200).json({
             sessionId: effectiveSessionId,
             status: result?.status || "waiting_for_answer",
@@ -335,41 +425,31 @@ Requirements:
 
     } catch (error) {
         console.error("Error starting interview:", error);
-        const isTimeout =
-            error.name === "TimeoutError" ||
-            error.name === "AbortError" ||
-            error.code === 23 ||
-            error.message?.includes("aborted due to timeout") ||
-            error.message?.includes("timed out");
+        const { statusCode, errorMsg, isTimeout } = resolveInterviewError(
+            error,
+            "Failed to start interview.",
+            "Starting the interview timed out while initializing the AI workflow. Please try again."
+        );
 
-        const isUnavailable =
-            error.message?.includes("ECONNREFUSED") ||
-            error.message?.includes("fetch failed") ||
-            error.status === 502 ||
-            error.status === 503;
-
-        let statusCode = 500;
-        let errorMsg = "Failed to start interview.";
-
-        if (isTimeout) {
-            statusCode = 504;
-            errorMsg = "Starting the interview timed out while initializing the AI workflow. Please try again.";
-        } else if (isUnavailable) {
-            statusCode = 503;
-            errorMsg = "AI interview service is temporarily unavailable. Please try again shortly.";
-        } else if (error.message) {
-            errorMsg = error.message;
-        }
+        const correlationId = logInterviewDiagnostic({
+            req,
+            action: "startInterview",
+            durationMs: Date.now() - startTime,
+            status: statusCode,
+            error,
+        });
 
         return res.status(statusCode).json({
             error: errorMsg,
             message: errorMsg,
             isTimeout,
+            correlationId,
         });
     }
 }
 
 export async function submitInterviewAnswerController(req, res) {
+    const startTime = Date.now();
     try {
         if (!req.user || !req.user.id) {
             return res.status(401).json({
@@ -469,6 +549,8 @@ export async function submitInterviewAnswerController(req, res) {
         }
         await session.save();
 
+        logInterviewDiagnostic({ req, action: "submitInterviewAnswer", durationMs: Date.now() - startTime, status: 200 });
+
         return res.status(200).json({
             ...result,
             stagePlan: session.stagePlan,
@@ -484,36 +566,25 @@ export async function submitInterviewAnswerController(req, res) {
 
     } catch (error) {
         console.error("Error submitting interview answer:", error);
-        const isTimeout =
-            error.name === "TimeoutError" ||
-            error.name === "AbortError" ||
-            error.code === 23 ||
-            error.message?.includes("aborted due to timeout") ||
-            error.message?.includes("timed out");
+        const { statusCode, errorMsg, isTimeout } = resolveInterviewError(
+            error,
+            "Failed to process interview answer.",
+            "The AI interview workflow took longer than expected to process your answer. Please submit again."
+        );
 
-        const isUnavailable =
-            error.message?.includes("ECONNREFUSED") ||
-            error.message?.includes("fetch failed") ||
-            error.status === 502 ||
-            error.status === 503;
-
-        let statusCode = 500;
-        let errorMsg = "Failed to process interview answer.";
-
-        if (isTimeout) {
-            statusCode = 504;
-            errorMsg = "The AI interview workflow took longer than expected to process your answer. Please submit again.";
-        } else if (isUnavailable) {
-            statusCode = 503;
-            errorMsg = "AI interview service is temporarily unavailable. Please try again shortly.";
-        } else if (error.message) {
-            errorMsg = error.message;
-        }
+        const correlationId = logInterviewDiagnostic({
+            req,
+            action: "submitInterviewAnswer",
+            durationMs: Date.now() - startTime,
+            status: statusCode,
+            error,
+        });
 
         return res.status(statusCode).json({
             error: errorMsg,
             message: errorMsg,
             isTimeout,
+            correlationId,
         });
     }
 }

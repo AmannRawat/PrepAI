@@ -103,13 +103,14 @@ export const ThemeProvider = ({ children }) => {
   // Active background URL string (either a built-in static path or a blob object URL)
   const [dashboardBg, setDashboardBgState] = useState(DEFAULT_BG.path);
 
-  // Custom background metadata & availability for active scope
+  // Custom background metadata, availability & preview URL for active scope
   const [hasCustomBg, setHasCustomBg] = useState(false);
   const [customBgMeta, setCustomBgMeta] = useState(null);
+  const [customBgUrl, setCustomBgUrl] = useState(null);
   const [isBgLoading, setIsBgLoading] = useState(true);
 
-  // Keep track of active object URL to prevent memory leaks and identity leakage
-  const activeObjectUrlRef = useRef(null);
+  // Keep track of active custom object URL to prevent memory leaks and identity leakage
+  const customObjectUrlRef = useRef(null);
 
   // Sync theme class to document root
   useEffect(() => {
@@ -121,6 +122,23 @@ export const ThemeProvider = ({ children }) => {
     }
     localStorage.setItem('theme', theme);
   }, [theme]);
+
+  // Helper to maintain a single blob URL for custom wallpaper preview without leaking memory
+  const updateCustomObjectUrl = useCallback((blob) => {
+    if (customObjectUrlRef.current) {
+      URL.revokeObjectURL(customObjectUrlRef.current);
+      customObjectUrlRef.current = null;
+    }
+    if (blob) {
+      const url = URL.createObjectURL(blob);
+      customObjectUrlRef.current = url;
+      setCustomBgUrl(url);
+      return url;
+    } else {
+      setCustomBgUrl(null);
+      return null;
+    }
+  }, []);
 
   // Account-scoped background loader and identity switch handler
   useEffect(() => {
@@ -136,12 +154,6 @@ export const ThemeProvider = ({ children }) => {
 
     const loadScopeBackground = async () => {
       setIsBgLoading(true);
-
-      // Clean up previous blob URL to prevent memory leaks and identity leakage
-      if (activeObjectUrlRef.current) {
-        URL.revokeObjectURL(activeObjectUrlRef.current);
-        activeObjectUrlRef.current = null;
-      }
 
       // 1. Retrieve account-scoped saved ID
       const accountKey = `prepai_dashboard_bg_id_${scope}`;
@@ -165,21 +177,22 @@ export const ThemeProvider = ({ children }) => {
         const stored = await getCustomBackground(scope);
         if (isCancelled) return;
 
+        let activeCustomUrl = null;
         if (stored && stored.blob) {
           setHasCustomBg(true);
           setCustomBgMeta(stored.metadata);
+          activeCustomUrl = updateCustomObjectUrl(stored.blob);
 
           if (savedId === 'custom') {
-            const url = URL.createObjectURL(stored.blob);
-            activeObjectUrlRef.current = url;
             setDashboardBgId('custom');
-            setDashboardBgState(url);
+            setDashboardBgState(activeCustomUrl);
             setIsBgLoading(false);
             return;
           }
         } else {
           setHasCustomBg(false);
           setCustomBgMeta(null);
+          updateCustomObjectUrl(null);
         }
 
         // If savedId was 'custom' but no custom blob exists for this account, fallback
@@ -203,12 +216,12 @@ export const ThemeProvider = ({ children }) => {
 
     return () => {
       isCancelled = true;
-      if (activeObjectUrlRef.current) {
-        URL.revokeObjectURL(activeObjectUrlRef.current);
-        activeObjectUrlRef.current = null;
+      if (customObjectUrlRef.current) {
+        URL.revokeObjectURL(customObjectUrlRef.current);
+        customObjectUrlRef.current = null;
       }
     };
-  }, [authLoaded, activeScope]);
+  }, [authLoaded, activeScope, updateCustomObjectUrl]);
 
   // Select a built-in background for the active account scope
   const selectBuiltInBg = useCallback((bgIdOrPath) => {
@@ -217,12 +230,7 @@ export const ThemeProvider = ({ children }) => {
       (b) => b.id === bgIdOrPath || b.path === bgIdOrPath
     ) || DEFAULT_BG;
 
-    // Revoke any active custom blob object URL
-    if (activeObjectUrlRef.current) {
-      URL.revokeObjectURL(activeObjectUrlRef.current);
-      activeObjectUrlRef.current = null;
-    }
-
+    // Note: Do not destroy the custom preview URL so the custom card keeps displaying the uploaded image
     setDashboardBgId(match.id);
     setDashboardBgState(match.path);
 
@@ -239,14 +247,7 @@ export const ThemeProvider = ({ children }) => {
 
     try {
       const stored = await saveCustomBackground(blob, metadata, scope);
-
-      // Create new blob object URL
-      const newUrl = URL.createObjectURL(blob);
-
-      if (activeObjectUrlRef.current) {
-        URL.revokeObjectURL(activeObjectUrlRef.current);
-      }
-      activeObjectUrlRef.current = newUrl;
+      const newUrl = updateCustomObjectUrl(blob);
 
       setHasCustomBg(true);
       setCustomBgMeta(stored);
@@ -261,45 +262,39 @@ export const ThemeProvider = ({ children }) => {
       console.error('Failed to apply custom background:', err);
       throw err;
     }
-  }, []);
+  }, [updateCustomObjectUrl]);
 
   // Switch back to an existing custom background if already in IndexedDB for active account scope
   const selectExistingCustomBg = useCallback(async () => {
     const scope = activeScopeRef.current;
     try {
-      const stored = await getCustomBackground(scope);
-      if (stored && stored.blob) {
-        const newUrl = URL.createObjectURL(stored.blob);
-
-        if (activeObjectUrlRef.current) {
-          URL.revokeObjectURL(activeObjectUrlRef.current);
+      let currentUrl = customObjectUrlRef.current;
+      if (!currentUrl) {
+        const stored = await getCustomBackground(scope);
+        if (stored && stored.blob) {
+          currentUrl = updateCustomObjectUrl(stored.blob);
+          setHasCustomBg(true);
+          setCustomBgMeta(stored.metadata);
         }
-        activeObjectUrlRef.current = newUrl;
+      }
 
+      if (currentUrl) {
         setDashboardBgId('custom');
-        setDashboardBgState(newUrl);
-        setHasCustomBg(true);
-        setCustomBgMeta(stored.metadata);
-
+        setDashboardBgState(currentUrl);
         localStorage.setItem(`prepai_dashboard_bg_id_${scope}`, 'custom');
         localStorage.setItem(`dashboardBg_${scope}`, 'custom');
       }
     } catch (err) {
       console.error('Failed to switch to existing custom background:', err);
     }
-  }, []);
+  }, [updateCustomObjectUrl]);
 
   // Remove the custom background from IndexedDB and revert to default for active account scope
   const removeCustomBg = useCallback(async () => {
     const scope = activeScopeRef.current;
     try {
       await deleteCustomBackground(scope);
-
-      if (activeObjectUrlRef.current) {
-        URL.revokeObjectURL(activeObjectUrlRef.current);
-        activeObjectUrlRef.current = null;
-      }
-
+      updateCustomObjectUrl(null);
       setHasCustomBg(false);
       setCustomBgMeta(null);
 
@@ -309,7 +304,7 @@ export const ThemeProvider = ({ children }) => {
       console.error('Failed to remove custom background:', err);
       throw err;
     }
-  }, [selectBuiltInBg]);
+  }, [selectBuiltInBg, updateCustomObjectUrl]);
 
   // Backward compatible setter for legacy calls
   const setDashboardBg = useCallback(
@@ -341,6 +336,7 @@ export const ThemeProvider = ({ children }) => {
         removeCustomBg,
         hasCustomBg,
         customBgMeta,
+        customBgUrl,
         isBgLoading,
         builtInBackgrounds: BUILT_IN_BACKGROUNDS,
         setDashboardBg,

@@ -24,184 +24,20 @@ import {
     LogIn,
     ExternalLink,
 } from "lucide-react";
+import PepeAvatar from "./PepeAvatar";
 
 const createId = () =>
     `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 function PrepAIRobot({ speaking = false, thinking = false, expression = "happy" }) {
-    const isThinking = thinking || expression === "thinking";
-    const isCelebrating = expression === "celebrating";
-
     return (
-        <svg
-            viewBox="0 0 160 160"
-            className="h-full w-full pepe-robot-svg"
-            role="img"
-            aria-label="Pepe AI DSA Coach"
-        >
-            <defs>
-                <linearGradient id="pepeBodyGrad" x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0%" stopColor="#60a5fa" />
-                    <stop offset="50%" stopColor="#3b82f6" />
-                    <stop offset="100%" stopColor="#2563eb" />
-                </linearGradient>
-                <linearGradient id="pepeFaceGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#1e293b" />
-                    <stop offset="100%" stopColor="#0f172a" />
-                </linearGradient>
-                <linearGradient id="pepeEyeGlow" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#38bdf8" />
-                    <stop offset="100%" stopColor="#0284c7" />
-                </linearGradient>
-                <filter id="pepeGlow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="3" result="blur" />
-                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                </filter>
-            </defs>
-
-            <style>{`
-                @keyframes pepeIdleFloat {
-                    0%, 100% { transform: translateY(0px); }
-                    50% { transform: translateY(-3px); }
-                }
-                @keyframes pepeBlink {
-                    0%, 92%, 100% { transform: scaleY(1); }
-                    95% { transform: scaleY(0.08); }
-                }
-                @keyframes pepeAntennaPulse {
-                    0%, 100% { fill: #38bdf8; filter: drop-shadow(0 0 2px #38bdf8); }
-                    50% { fill: #fbbf24; filter: drop-shadow(0 0 6px #f59e0b); }
-                }
-                @keyframes pepeMouthTalk {
-                    0%, 100% { height: 4px; y: 84px; }
-                    50% { height: 11px; y: 80px; rx: 5px; }
-                }
-                .pepe-floating-group {
-                    animation: pepeIdleFloat 3s ease-in-out infinite;
-                    transform-origin: center;
-                }
-                .pepe-eye-lid {
-                    transform-origin: 80px 63px;
-                    animation: pepeBlink 4s ease-in-out infinite;
-                }
-                .pepe-antenna-bulb-thinking {
-                    animation: pepeAntennaPulse 0.8s ease-in-out infinite;
-                }
-                .pepe-talking-mouth {
-                    animation: pepeMouthTalk 0.28s ease-in-out infinite;
-                }
-            `}</style>
-
-            <g className="pepe-floating-group">
-                {/* Antenna */}
-                <path d="M80 24 V13" stroke="#93c5fd" strokeWidth="4.5" strokeLinecap="round" />
-                <circle
-                    cx="80"
-                    cy="9"
-                    r="6.5"
-                    fill={isThinking ? "#fbbf24" : "#38bdf8"}
-                    className={isThinking ? "pepe-antenna-bulb-thinking" : ""}
-                    filter="url(#pepeGlow)"
-                />
-
-                {/* Left and Right Cute Ear Headphones */}
-                <rect x="16" y="58" width="13" height="32" rx="6.5" fill="#3b82f6" />
-                <rect x="18" y="63" width="6" height="22" rx="3" fill="#93c5fd" />
-                <rect x="131" y="58" width="13" height="32" rx="6.5" fill="#3b82f6" />
-                <rect x="136" y="63" width="6" height="22" rx="3" fill="#93c5fd" />
-
-                {/* Outer Rounded Head Body */}
-                <rect x="25" y="24" width="110" height="92" rx="32" fill="url(#pepeBodyGrad)" />
-                {/* Head highlight shine */}
-                <path d="M48 28 Q80 25 112 28" stroke="rgba(255,255,255,0.45)" strokeWidth="3" strokeLinecap="round" fill="none" />
-
-                {/* Inner Visor / Dark Display */}
-                <rect x="36" y="37" width="88" height="66" rx="22" fill="url(#pepeFaceGrad)" />
-                <rect x="36" y="37" width="88" height="66" rx="22" fill="none" stroke="#334155" strokeWidth="1.5" />
-
-                {/* Eyes Group with Blinking */}
-                <g className={isThinking ? "" : "pepe-eye-lid"}>
-                    {isCelebrating ? (
-                        <>
-                            {/* Joyful happy curved eyes */}
-                            <path d="M51 68 Q59 55 67 68" fill="none" stroke="#38bdf8" strokeWidth="4.5" strokeLinecap="round" />
-                            <path d="M93 68 Q101 55 109 68" fill="none" stroke="#38bdf8" strokeWidth="4.5" strokeLinecap="round" />
-                        </>
-                    ) : isThinking ? (
-                        <>
-                            {/* Thoughtful eyes looking up */}
-                            <ellipse cx="60" cy="58" rx="8" ry="8.5" fill="url(#pepeEyeGlow)" />
-                            <circle cx="62" cy="56" r="2.8" fill="#ffffff" />
-                            <ellipse cx="100" cy="58" rx="8" ry="8.5" fill="url(#pepeEyeGlow)" />
-                            <circle cx="102" cy="56" r="2.8" fill="#ffffff" />
-                        </>
-                    ) : (
-                        <>
-                            {/* Expressive big friendly eyes with cute glossy highlights */}
-                            <ellipse cx="59" cy="63" rx="8" ry="9.5" fill="url(#pepeEyeGlow)" />
-                            <circle cx="57" cy="60" r="3" fill="#ffffff" />
-                            <circle cx="62" cy="65" r="1.5" fill="#ffffff" opacity="0.8" />
-
-                            <ellipse cx="101" cy="63" rx="8" ry="9.5" fill="url(#pepeEyeGlow)" />
-                            <circle cx="99" cy="60" r="3" fill="#ffffff" />
-                            <circle cx="104" cy="65" r="1.5" fill="#ffffff" opacity="0.8" />
-                        </>
-                    )}
-                </g>
-
-                {/* Cute Cheeks */}
-                <ellipse cx="49" cy="74" rx="4.5" ry="2.5" fill="#f472b6" opacity="0.45" />
-                <ellipse cx="111" cy="74" rx="4.5" ry="2.5" fill="#f472b6" opacity="0.45" />
-
-                {/* Mouth */}
-                {speaking ? (
-                    /* Active speech animation mouth */
-                    <rect
-                        x="71"
-                        y="81"
-                        width="18"
-                        height="8"
-                        rx="4"
-                        fill="#38bdf8"
-                        className="pepe-talking-mouth"
-                    />
-                ) : isThinking ? (
-                    /* Inquisitive curved small mouth */
-                    <path
-                        d="M72 84 Q80 87 88 84"
-                        fill="none"
-                        stroke="#38bdf8"
-                        strokeWidth="3.5"
-                        strokeLinecap="round"
-                    />
-                ) : isCelebrating ? (
-                    /* Wide beaming smile */
-                    <path
-                        d="M68 81 Q80 93 92 81"
-                        fill="none"
-                        stroke="#38bdf8"
-                        strokeWidth="3.5"
-                        strokeLinecap="round"
-                    />
-                ) : (
-                    /* Friendly curved resting smile */
-                    <path
-                        d="M71 83 Q80 89 89 83"
-                        fill="none"
-                        stroke="#38bdf8"
-                        strokeWidth="3.5"
-                        strokeLinecap="round"
-                    />
-                )}
-
-                {/* Bottom collar / body base */}
-                <path d="M46 116 Q80 110 114 116 L121 143 Q80 156 39 143 Z" fill="#dbeafe" />
-                <rect x="63" y="123" width="34" height="15" rx="7" fill="#2563eb" />
-                <circle cx="80" cy="130.5" r="3" fill="#bfdbfe" />
-                <path d="M45 122 L31 136" stroke="#60a5fa" strokeWidth="8" strokeLinecap="round" />
-                <path d="M115 122 L129 136" stroke="#60a5fa" strokeWidth="8" strokeLinecap="round" />
-            </g>
-        </svg>
+        <PepeAvatar
+            isSpeaking={speaking}
+            isThinking={thinking || expression === "thinking"}
+            isCelebrating={expression === "celebrating"}
+            size="custom"
+            className="w-full h-full"
+        />
     );
 }
 
@@ -625,6 +461,11 @@ export default function DsaCoach({
     const [soundEnabled, setSoundEnabled] = useState(true);
     const [position, setPosition] = useState({ x: 0, y: 64 });
     const [panelSize, setPanelSize] = useState({ width: 360, height: 350 });
+    const userPositionRef = useRef({ x: 0, y: 64 });
+    const isInputFocusedRef = useRef(false);
+    const isKeyboardActiveRef = useRef(false);
+    const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+    const [keyboardViewportHeight, setKeyboardViewportHeight] = useState(null);
     const [showPlan, setShowPlan] = useState(false);
     const [_showGiveUpOptions, setShowGiveUpOptions] = useState(false);
     const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
@@ -717,22 +558,85 @@ export default function DsaCoach({
 
         const width = panelRef.current.offsetWidth;
 
-        setPosition((current) =>
-            clampPosition(
-                current.x === 0 ? window.innerWidth - width - 24 : current.x,
-                current.y
-            )
-        );
+        setPosition((current) => {
+            const initialX = current.x === 0 ? window.innerWidth - width - 24 : current.x;
+            const clamped = clampPosition(initialX, current.y);
+            userPositionRef.current = clamped;
+            return clamped;
+        });
     }, [isOpen, clampPosition]);
 
     useEffect(() => {
-        const handleResize = () => {
-            setPosition((current) => clampPosition(current.x, current.y));
+        if (typeof window === "undefined") return;
+
+        const handleViewportChange = () => {
+            if (!isOpen) return;
+
+            const isMobile = window.innerWidth < 768;
+            if (!isMobile) {
+                // Desktop: Keep position clamped to screen bounds
+                setPosition((current) => {
+                    const next = clampPosition(current.x, current.y);
+                    userPositionRef.current = next;
+                    return next;
+                });
+                return;
+            }
+
+            // Mobile: inspect visualViewport
+            const vv = window.visualViewport;
+            const windowH = window.innerHeight;
+            const vvHeight = vv ? vv.height : windowH;
+            const vvTop = vv ? vv.offsetTop : 0;
+
+            const isKeyboardUp =
+                windowH - vvHeight > 140 ||
+                (isInputFocusedRef.current && vvHeight < windowH * 0.88);
+
+            if (isKeyboardUp) {
+                isKeyboardActiveRef.current = true;
+                setIsKeyboardOpen(true);
+                setKeyboardViewportHeight(vvHeight);
+
+                const maxAllowedPanelH = Math.max(200, Math.min(panelSize.height, vvHeight - 16));
+                const targetY = vvTop + Math.max(8, vvHeight - maxAllowedPanelH - 8);
+
+                // Adjust temporary display position without mutating userPositionRef.current
+                setPosition((current) => ({
+                    x: clampPosition(current.x, current.y).x,
+                    y: Math.max(vvTop + 8, targetY),
+                }));
+            } else {
+                isKeyboardActiveRef.current = false;
+                setIsKeyboardOpen(false);
+                setKeyboardViewportHeight(null);
+
+                // Smoothly restore the user's intended position
+                if (userPositionRef.current) {
+                    const restored = clampPosition(
+                        userPositionRef.current.x,
+                        userPositionRef.current.y
+                    );
+                    setPosition(restored);
+                }
+            }
         };
 
-        window.addEventListener("resize", handleResize);
-        return () => window.removeEventListener("resize", handleResize);
-    }, [clampPosition]);
+        const vv = window.visualViewport;
+        if (vv) {
+            vv.addEventListener("resize", handleViewportChange);
+            vv.addEventListener("scroll", handleViewportChange);
+        }
+        window.addEventListener("resize", handleViewportChange);
+
+        return () => {
+            if (vv) {
+                vv.removeEventListener("resize", handleViewportChange);
+                vv.removeEventListener("scroll", handleViewportChange);
+            }
+            window.removeEventListener("resize", handleViewportChange);
+        };
+    }, [isOpen, clampPosition, panelSize.height]);
 
     const addAssistantMessage = useCallback((text) => {
         const id = createId();
@@ -1551,13 +1455,13 @@ export default function DsaCoach({
         if (!dragRef.current) return;
 
         const drag = dragRef.current;
-
-        setPosition(
-            clampPosition(
-                drag.startX + event.clientX - drag.pointerX,
-                drag.startY + event.clientY - drag.pointerY
-            )
+        const newPos = clampPosition(
+            drag.startX + event.clientX - drag.pointerX,
+            drag.startY + event.clientY - drag.pointerY
         );
+
+        userPositionRef.current = newPos;
+        setPosition(newPos);
     };
 
     if (!isOpen) {
@@ -1570,9 +1474,15 @@ export default function DsaCoach({
                 }}
                 aria-label="Open PrepAI DSA Coach"
                 title="Open PrepAI Coach"
-                className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:bottom-5 right-4 md:right-5 z-[80] h-14 w-14 rounded-full border border-text-secondary/30 bg-surface p-1 shadow-xl transition hover:scale-105"
+                className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:bottom-5 right-4 md:right-5 z-[80] h-14 w-14 rounded-full border border-text-secondary/30 bg-surface p-1 shadow-xl transition hover:scale-105 flex items-center justify-center overflow-hidden"
             >
-                <PrepAIRobot speaking={isTyping} thinking={isRequesting} expression={expression} />
+                <PepeAvatar
+                    isSpeaking={isTyping}
+                    isThinking={isRequesting || expression === "thinking"}
+                    isCelebrating={expression === "celebrating"}
+                    size="custom"
+                    className="w-full h-full"
+                />
                 <span className="absolute right-0.5 top-0.5 h-3 w-3 rounded-full border-2 border-surface bg-emerald-500" />
             </button>
         );
@@ -1580,7 +1490,7 @@ export default function DsaCoach({
 
     return (
         <div
-            className="fixed z-[80]"
+            className={`fixed z-[80] ${isKeyboardOpen ? "transition-[top,height] duration-200 ease-out" : ""}`}
             style={{
                 left: position.x,
                 top: position.y,
@@ -1588,14 +1498,23 @@ export default function DsaCoach({
             }}
         >
             <div className="pointer-events-none absolute -left-[58px] top-0 hidden h-[54px] w-[54px] sm:block">
-                <PrepAIRobot speaking={isTyping} thinking={isRequesting} expression={expression} />
+                <PepeAvatar
+                    isSpeaking={isTyping}
+                    isThinking={isRequesting || expression === "thinking"}
+                    isCelebrating={expression === "celebrating"}
+                    size="custom"
+                    className="w-full h-full"
+                    withBody={true}
+                />
             </div>
 
             <section
                 ref={panelRef}
                 aria-label="PrepAI DSA Coach"
                 style={{
-                    height: `min(${panelSize.height}px, calc(100vh - 24px))`,
+                    height: isKeyboardOpen && keyboardViewportHeight
+                        ? `${Math.max(200, Math.min(panelSize.height, keyboardViewportHeight - 16))}px`
+                        : `min(${panelSize.height}px, calc(100vh - 24px))`,
                     maxWidth: "100%",
                 }}
                 className="relative flex w-full flex-col overflow-hidden rounded-2xl border border-text-secondary/25 bg-surface text-text-primary shadow-xl"
@@ -1615,8 +1534,14 @@ export default function DsaCoach({
                     className="flex shrink-0 touch-none cursor-grab items-center gap-2 border-b border-text-secondary/20 px-3 py-2 active:cursor-grabbing"
                 >
                     <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <div className="h-7 w-7 sm:h-8 sm:w-8 shrink-0">
-                            <PrepAIRobot speaking={isTyping} thinking={isRequesting} expression={expression} />
+                        <div className="sm:hidden h-7 w-7 sm:h-8 sm:w-8 shrink-0 flex items-center justify-center">
+                            <PepeAvatar
+                                isSpeaking={isTyping}
+                                isThinking={isRequesting || expression === "thinking"}
+                                isCelebrating={expression === "celebrating"}
+                                size="custom"
+                                className="w-full h-full"
+                            />
                         </div>
                         <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
@@ -1895,7 +1820,43 @@ export default function DsaCoach({
                             <input
                                 value={input}
                                 onChange={(event) => setInput(event.target.value)}
-                                onFocus={unlockAudio}
+                                onFocus={() => {
+                                    isInputFocusedRef.current = true;
+                                    unlockAudio();
+                                    if (typeof window !== "undefined" && window.innerWidth < 768) {
+                                        setTimeout(() => {
+                                            const vv = window.visualViewport;
+                                            if (vv && vv.height < window.innerHeight * 0.88) {
+                                                isKeyboardActiveRef.current = true;
+                                                setIsKeyboardOpen(true);
+                                                setKeyboardViewportHeight(vv.height);
+                                                const maxAllowedPanelH = Math.max(200, Math.min(panelSize.height, vv.height - 16));
+                                                const targetY = (vv.offsetTop || 0) + Math.max(8, vv.height - maxAllowedPanelH - 8);
+                                                setPosition((current) => ({
+                                                    x: clampPosition(current.x, current.y).x,
+                                                    y: Math.max((vv.offsetTop || 0) + 8, targetY),
+                                                }));
+                                            }
+                                        }, 120);
+                                    }
+                                }}
+                                onBlur={() => {
+                                    isInputFocusedRef.current = false;
+                                    setTimeout(() => {
+                                        if (!isInputFocusedRef.current && typeof window !== "undefined") {
+                                            const vv = window.visualViewport;
+                                            const vvH = vv ? vv.height : window.innerHeight;
+                                            if (window.innerHeight - vvH < 100) {
+                                                isKeyboardActiveRef.current = false;
+                                                setIsKeyboardOpen(false);
+                                                setKeyboardViewportHeight(null);
+                                                if (userPositionRef.current) {
+                                                    setPosition(clampPosition(userPositionRef.current.x, userPositionRef.current.y));
+                                                }
+                                            }
+                                        }
+                                    }, 200);
+                                }}
                                 onClick={unlockAudio}
                                 disabled={isTyping || isRequesting}
                                 placeholder="Ask your DSA coach..."

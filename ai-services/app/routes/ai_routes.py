@@ -192,47 +192,61 @@ async def start_interview(request: StartInterviewRequest):
 
         init_diff = (request.difficulty or "Medium").capitalize()
 
-        result = interview_graph.invoke(
-            {
+        t_start = time.perf_counter()
+
+        try:
+            result = interview_graph.invoke(
+                {
+                    "session_id": request.session_id,
+                    "user_id": request.user_id,
+                    "document_id": request.document_id,
+                    "target_role": request.target_role,
+                    "target_company": request.target_company,
+                    "interview_type": request.interview_type or "Behavioral",
+                    "difficulty": init_diff,
+                    "starting_difficulty": init_diff,
+                    "adaptive_difficulty": init_diff,
+                    "stage_plan": request.stage_plan or [],
+                    "current_stage_index": request.current_stage_index or 0,
+                    "experience_level": request.experience_level or "fresher",
+                    "years_of_experience": request.years_of_experience or "",
+                    "focus_areas": request.focus_areas or "",
+                    "resume_context": "",
+                    "memory_context": request.memory_context,
+                    "current_question": request.first_question,
+                    "candidate_answer": "",
+                    "evaluation": "",
+                    "next_action": "",
+                    "interview_response": "",
+                    "sources": [],
+                    "interview_history": [],
+                    "final_report": "",
+                    "memories": [],
+                },
+                config=config,
+            )
+
+            total_duration_ms = round((time.perf_counter() - t_start) * 1000, 2)
+            print(f"[Turn Timing] start_interview session_id={request.session_id} duration_ms={total_duration_ms} status=success")
+
+            return {
                 "session_id": request.session_id,
-                "user_id": request.user_id,
-                "document_id": request.document_id,
-                "target_role": request.target_role,
-                "target_company": request.target_company,
-                "interview_type": request.interview_type or "Behavioral",
-                "difficulty": init_diff,
-                "starting_difficulty": init_diff,
-                "adaptive_difficulty": init_diff,
+                "status": "waiting_for_answer",
+                "question": request.first_question,
                 "stage_plan": request.stage_plan or [],
                 "current_stage_index": request.current_stage_index or 0,
-                "experience_level": request.experience_level or "fresher",
-                "years_of_experience": request.years_of_experience or "",
-                "focus_areas": request.focus_areas or "",
-                "resume_context": "",
-                "memory_context": request.memory_context,
-                "current_question": request.first_question,
-                "candidate_answer": "",
-                "evaluation": "",
-                "next_action": "",
-                "interview_response": "",
-                "sources": [],
-                "interview_history": [],
-                "final_report": "",
-                "memories": [],
-            },
-            config=config,
-        )
+                "starting_difficulty": init_diff,
+                "adaptive_difficulty": init_diff,
+                "difficulty": init_diff,
+            }
 
-        return {
-            "session_id": request.session_id,
-            "status": "waiting_for_answer",
-            "question": request.first_question,
-            "stage_plan": request.stage_plan or [],
-            "current_stage_index": request.current_stage_index or 0,
-            "starting_difficulty": init_diff,
-            "adaptive_difficulty": init_diff,
-            "difficulty": init_diff,
-        }
+        except Exception as error:
+            total_duration_ms = round((time.perf_counter() - t_start) * 1000, 2)
+            print(f"[Turn Timing] start_interview session_id={request.session_id} duration_ms={total_duration_ms} status=error error={str(error)}")
+            raise HTTPException(
+                status_code=500,
+                detail=str(error),
+            )
 
 
 # Submit an answer and resume the existing LangGraph session

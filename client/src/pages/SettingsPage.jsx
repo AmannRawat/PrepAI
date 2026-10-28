@@ -108,6 +108,7 @@ const SettingsPage = () => {
     removeCustomBg,
     hasCustomBg,
     customBgMeta,
+    customBgUrl,
     builtInBackgrounds,
   } = useTheme();
 
@@ -201,14 +202,18 @@ const SettingsPage = () => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
 
     const allVoices = window.speechSynthesis.getVoices();
-    const saved = localStorage.getItem('preferredVoiceName') || selectedVoiceName;
+    const saved = localStorage.getItem('preferredVoiceName');
     const { sortedVoices, defaultVoiceName } = processSpeechVoices(allVoices, saved);
 
     setVoices(sortedVoices);
-    if (defaultVoiceName && (!selectedVoiceName || !sortedVoices.some((v) => v.name === selectedVoiceName))) {
-      setSelectedVoiceName(defaultVoiceName);
-    }
-  }, [selectedVoiceName]);
+    setSelectedVoiceName((current) => {
+      const candidate = current || saved;
+      if (candidate && sortedVoices.some((v) => v.name === candidate)) {
+        return candidate;
+      }
+      return defaultVoiceName || current || '';
+    });
+  }, []);
 
   useEffect(() => {
     loadVoices();
@@ -1334,7 +1339,7 @@ const SettingsPage = () => {
             {/* Built-in Wallpaper Grid (8 real assets) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 mb-5">
               {builtInBackgrounds.map((bg) => {
-                const isSelected = !hasCustomBg && dashboardBgId === bg.id;
+                const isSelected = dashboardBgId === bg.id;
                 const isFailed = failedImages[bg.id];
 
                 return (
@@ -1486,8 +1491,8 @@ const SettingsPage = () => {
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-14 h-9 rounded-lg overflow-hidden border border-border shrink-0 bg-black">
                           <img
-                            src={dashboardBgId === 'custom' ? dashboardBg : '/backgrounds/bg-lake-morning.jpg'}
-                            alt="Custom Background"
+                            src={customBgUrl || (dashboardBgId === 'custom' ? dashboardBg : '')}
+                            alt={customBgMeta?.fileName || 'Custom Wallpaper'}
                             className="w-full h-full object-cover"
                           />
                         </div>

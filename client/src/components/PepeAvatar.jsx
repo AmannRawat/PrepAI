@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 /**
  * PepeAvatar Component
@@ -20,16 +20,28 @@ export default function PepeAvatar({
     isCelebrating = false,
     size = 'md',
     className = '',
+    withBody = false,
 }) {
+    // Unique ID for SVG paint servers (gradients/filters) to prevent cross-component
+    // ID collision when multiple instances exist or when one is inside a hidden container (e.g. mobile sidebar).
+    const rawId = useId();
+    const id = rawId.replace(/[^a-zA-Z0-9_-]/g, '');
+    const bodyGradId = `pepeAvatarBodyGrad_${id}`;
+    const faceGradId = `pepeAvatarFaceGrad_${id}`;
+    const eyeGlowId = `pepeAvatarEyeGlow_${id}`;
+    const glowFilterId = `pepeAvatarGlow_${id}`;
+
     // Proportional sizing tokens for direct face rendering
     const sizeClasses = {
         sm: 'w-9 h-8 min-w-[36px]',
         md: 'w-11 h-10 min-w-[44px]',
         lg: 'w-14 h-13 min-w-[56px]',
         xl: 'w-20 h-18 min-w-[80px]',
+        custom: '',
+        auto: '',
     };
 
-    const containerSize = sizeClasses[size] || sizeClasses.md;
+    const containerSize = sizeClasses[size] !== undefined ? sizeClasses[size] : sizeClasses.md;
 
     return (
         <div
@@ -46,25 +58,25 @@ export default function PepeAvatar({
             }
         >
             <svg
-                viewBox="14 1 132 120"
+                viewBox={withBody ? "0 0 160 160" : "14 1 132 120"}
                 className="w-full h-full drop-shadow-sm overflow-visible"
                 aria-hidden="true"
             >
                 <defs>
-                    <linearGradient id="pepeAvatarBodyGrad" x1="0" y1="0" x2="1" y2="1">
+                    <linearGradient id={bodyGradId} x1="0" y1="0" x2="1" y2="1">
                         <stop offset="0%" stopColor="#60a5fa" />
                         <stop offset="50%" stopColor="#3b82f6" />
                         <stop offset="100%" stopColor="#2563eb" />
                     </linearGradient>
-                    <linearGradient id="pepeAvatarFaceGrad" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id={faceGradId} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#1e293b" />
                         <stop offset="100%" stopColor="#0f172a" />
                     </linearGradient>
-                    <linearGradient id="pepeAvatarEyeGlow" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id={eyeGlowId} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#38bdf8" />
                         <stop offset="100%" stopColor="#0284c7" />
                     </linearGradient>
-                    <filter id="pepeAvatarGlow" x="-20%" y="-20%" width="140%" height="140%">
+                    <filter id={glowFilterId} x="-20%" y="-20%" width="140%" height="140%">
                         <feGaussianBlur stdDeviation="3" result="blur" />
                         <feComposite in="SourceGraphic" in2="blur" operator="over" />
                     </filter>
@@ -120,7 +132,7 @@ export default function PepeAvatar({
                         r="6.5"
                         fill={isThinking ? "#fbbf24" : "#38bdf8"}
                         className={isThinking ? "pepe-av-antenna-thinking" : ""}
-                        filter="url(#pepeAvatarGlow)"
+                        filter={`url(#${glowFilterId})`}
                     />
 
                     {/* Cute Ear Headphones */}
@@ -129,12 +141,26 @@ export default function PepeAvatar({
                     <rect x="131" y="58" width="13" height="32" rx="6.5" fill="#3b82f6" />
                     <rect x="136" y="63" width="6" height="22" rx="3" fill="#93c5fd" />
 
+                    {/* Cute Robot Body (when withBody is true) */}
+                    {withBody && (
+                        <g id="pepeAvatarBodyGroup">
+                            {/* Torso */}
+                            <path d="M49 117 Q80 108 111 117 L119 145 Q80 158 41 145 Z" fill="#dbeafe" />
+                            {/* Chest Badge / Core */}
+                            <rect x="64" y="124" width="32" height="15" rx="7" fill="#2563eb" />
+                            <circle cx="80" cy="131.5" r="3" fill="#bfdbfe" />
+                            {/* Arms */}
+                            <path d="M47 123 L33 137" stroke="#60a5fa" strokeWidth="9" strokeLinecap="round" />
+                            <path d="M113 123 L127 137" stroke="#60a5fa" strokeWidth="9" strokeLinecap="round" />
+                        </g>
+                    )}
+
                     {/* Outer Rounded Head */}
-                    <rect x="25" y="24" width="110" height="92" rx="32" fill="url(#pepeAvatarBodyGrad)" />
+                    <rect x="25" y="24" width="110" height="92" rx="32" fill={`url(#${bodyGradId})`} />
                     <path d="M48 28 Q80 25 112 28" stroke="rgba(255,255,255,0.45)" strokeWidth="3" strokeLinecap="round" fill="none" />
 
                     {/* Visor / Face Screen */}
-                    <rect x="36" y="37" width="88" height="66" rx="22" fill="url(#pepeAvatarFaceGrad)" />
+                    <rect x="36" y="37" width="88" height="66" rx="22" fill={`url(#${faceGradId})`} />
                     <rect x="36" y="37" width="88" height="66" rx="22" fill="none" stroke="#334155" strokeWidth="1.5" />
 
                     {/* Eyes */}
@@ -146,18 +172,18 @@ export default function PepeAvatar({
                             </>
                         ) : isThinking ? (
                             <>
-                                <ellipse cx="60" cy="58" rx="8" ry="8.5" fill="url(#pepeAvatarEyeGlow)" />
+                                <ellipse cx="60" cy="58" rx="8" ry="8.5" fill={`url(#${eyeGlowId})`} />
                                 <circle cx="62" cy="56" r="2.8" fill="#ffffff" />
-                                <ellipse cx="100" cy="58" rx="8" ry="8.5" fill="url(#pepeAvatarEyeGlow)" />
+                                <ellipse cx="100" cy="58" rx="8" ry="8.5" fill={`url(#${eyeGlowId})`} />
                                 <circle cx="102" cy="56" r="2.8" fill="#ffffff" />
                             </>
                         ) : (
                             <>
-                                <ellipse cx="59" cy="63" rx="8" ry="9.5" fill="url(#pepeAvatarEyeGlow)" />
+                                <ellipse cx="59" cy="63" rx="8" ry="9.5" fill={`url(#${eyeGlowId})`} />
                                 <circle cx="57" cy="60" r="3" fill="#ffffff" />
                                 <circle cx="62" cy="65" r="1.5" fill="#ffffff" opacity="0.8" />
 
-                                <ellipse cx="101" cy="63" rx="8" ry="9.5" fill="url(#pepeAvatarEyeGlow)" />
+                                <ellipse cx="101" cy="63" rx="8" ry="9.5" fill={`url(#${eyeGlowId})`} />
                                 <circle cx="99" cy="60" r="3" fill="#ffffff" />
                                 <circle cx="104" cy="65" r="1.5" fill="#ffffff" opacity="0.8" />
                             </>

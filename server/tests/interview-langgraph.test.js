@@ -14,7 +14,7 @@ import UserMemory from "../models/UserMemory.model.js";
 import User from "../models/User.model.js";
 import ResumeReview from "../models/ResumeReview.model.js";
 import * as memoryService from "../services/memory.service.js";
-import { AI_SERVICE_TIMEOUT_MS } from "../services/ai.service.js";
+import { AI_SERVICE_TIMEOUT_MS, getAiServiceUrl, AiServiceError } from "../services/ai.service.js";
 
 import { setCustomTextGenerator } from "../services/gemini.service.js";
 let lastGeneratedPrompt = "";
@@ -27,13 +27,14 @@ setCustomTextGenerator(async (prompt) => {
 });
 
 // Helper to create mock Express req/res
-function createMockReqRes({ user, body = {}, params = {}, query = {}, file = null } = {}) {
+function createMockReqRes({ user, body = {}, params = {}, query = {}, file = null, headers = {} } = {}) {
   const req = {
     user,
     body,
     params,
     query,
-    file
+    file,
+    headers
   };
 
   const res = {
@@ -484,6 +485,112 @@ async function runAllTests() {
     await startInterviewController(req, res);
     assert.equal(res.statusCode, 504);
     assert.match(res.data.message, /timed out|longer than expected/i);
+  });
+
+  // 12b. Render Sleep & Upstream 502/503 Handling for Start Interview
+  await runTest("startInterviewController returns HTTP 503 when AI service returns 502 or 503 during wake-up", async () => {
+    mockFetchHandler = async () => ({
+      ok: false,
+      status: 503,
+      text: async () => JSON.stringify({ detail: "Service Unavailable - Server starting up" })
+    });
+
+    const { req, res } = createMockReqRes({
+      user: userA,
+      body: { targetRole: "Backend Engineer", targetCompany: "Google" }
+    });
+
+    await startInterviewController(req, res);
+    assert.equal(res.statusCode, 503);
+    assert.match(res.data.message, /temporarily unavailable|waking up/i);
+  });
+
+  // 12c. Upstream 403 Forbidden (Service Secret Mismatch)
+  await runTest("startInterviewController returns HTTP 502 when AI service secret is rejected with 403 Forbidden", async () => {
+    mockFetchHandler = async () => ({
+      ok: false,
+      status: 403,
+      text: async () => JSON.stringify({ detail: "Forbidden: Invalid or missing internal service key." })
+    });
+
+    const { req, res } = createMockReqRes({
+      user: userA,
+      body: { targetRole: "Backend Engineer", targetCompany: "Google" }
+    });
+
+    await startInterviewController(req, res);
+    assert.equal(res.statusCode, 502);
+    assert.match(res.data.message, /authentication failure|service authentication/i);
+  });
+
+  // 12d. Upstream 404 Not Found (Route / Trailing Slash Issue)
+  await runTest("startInterviewController returns HTTP 502 when AI service endpoint is not found (404)", async () => {
+    mockFetchHandler = async () => ({
+      ok: false,
+      status: 404,
+      text: async () => JSON.stringify({ detail: "Not Found" })
+    });
+
+    const { req, res } = createMockReqRes({
+      user: userA,
+      body: { targetRole: "Backend Engineer", targetCompany: "Google" }
+    });
+
+    await startInterviewController(req, res);
+    assert.equal(res.statusCode, 502);
+    assert.match(res.data.message, /endpoint not found/i);
+  });
+
+  // 12e. Upstream 500 (LangGraph / Python Exception Propagation)
+  await runTest("startInterviewController returns HTTP 502 and preserves upstream detail on AI service 500", async () => {
+    mockFetchHandler = async () => ({
+      ok: false,
+      status: 500,
+      text: async () => JSON.stringify({ detail: "LangGraph checkpointer database locked" })
+    });
+
+    const { req, res } = createMockReqRes({
+      user: userA,
+      body: { targetRole: "Backend Engineer", targetCompany: "Google" }
+    });
+
+    await startInterviewController(req, res);
+    assert.equal(res.statusCode, 502);
+    assert.match(res.data.message, /database locked|encountered an error/i);
+  });
+
+  // 12f. Correlation ID Propagation
+  await runTest("startInterviewController preserves and returns client-provided x-request-id correlation ID", async () => {
+    mockFetchHandler = async () => ({
+      ok: false,
+      status: 503,
+      text: async () => JSON.stringify({ detail: "Service Unavailable" })
+    });
+
+    const testCorrelationId = "test-req-trace-987654";
+    const { req, res } = createMockReqRes({
+      user: userA,
+      headers: { "x-request-id": testCorrelationId },
+      body: { targetRole: "Backend Engineer", targetCompany: "Google" }
+    });
+
+    await startInterviewController(req, res);
+    assert.equal(res.data.correlationId, testCorrelationId);
+  });
+
+  // 12g. URL Normalization
+  await runTest("getAiServiceUrl strips trailing slashes to prevent double-slash route failures", async () => {
+    const origUrl = process.env.AI_SERVICE_URL;
+    try {
+      process.env.AI_SERVICE_URL = "https://prepai-ai-services.onrender.com///";
+      assert.equal(getAiServiceUrl(), "https://prepai-ai-services.onrender.com");
+    } finally {
+      if (origUrl !== undefined) {
+        process.env.AI_SERVICE_URL = origUrl;
+      } else {
+        delete process.env.AI_SERVICE_URL;
+      }
+    }
   });
 
   // 13. Configurable Timeout Verification

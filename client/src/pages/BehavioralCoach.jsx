@@ -288,6 +288,7 @@ const BehavioralCoach = () => {
   const [voices, setVoices] = useState([]);
   const [selectedVoiceName, setSelectedVoiceName] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speakingMessageText, setSpeakingMessageText] = useState(null);
   const [activityRecorded, setActivityRecorded] = useState(false);
 
   // Setup state
@@ -830,8 +831,8 @@ const BehavioralCoach = () => {
   // ---------------------------------------------------------
   // Speech Synthesis Playback
   // ---------------------------------------------------------
-  const speak = (text) => {
-    if (!isTtsEnabled) return;
+  const speak = (text, force = false) => {
+    if (!isTtsEnabled && !force) return;
     window.speechSynthesis.cancel();
     const cleanedText = cleanTextForSpeech(text);
     if (!cleanedText) return;
@@ -847,15 +848,25 @@ const BehavioralCoach = () => {
     }
 
     utterance.rate = 0.9;
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+      setSpeakingMessageText(text);
+    };
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setSpeakingMessageText(null);
+    };
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setSpeakingMessageText(null);
+    };
     window.speechSynthesis.speak(utterance);
   };
 
   const stopSpeaking = () => {
     window.speechSynthesis.cancel();
     setIsSpeaking(false);
+    setSpeakingMessageText(null);
   };
 
   // ---------------------------------------------------------
@@ -2169,7 +2180,7 @@ const BehavioralCoach = () => {
                   {isAi && (
                     <PepeAvatar
                       size="md"
-                      isSpeaking={isSpeaking && isLatestAi}
+                      isSpeaking={isSpeaking && (speakingMessageText ? speakingMessageText === msg.text : isLatestAi)}
                       className="mt-0.5 shrink-0"
                     />
                   )}
@@ -2243,19 +2254,64 @@ const BehavioralCoach = () => {
 
                       {isAi && (
                         <button
-                          onClick={() => speak(msg.text)}
-                          className="absolute -right-8 top-1.5 opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary hover:text-accent p-1"
-                          title="Read aloud"
+                          type="button"
+                          onClick={() => {
+                            if (isSpeaking && speakingMessageText === msg.text) {
+                              stopSpeaking();
+                            } else {
+                              speak(msg.text, true);
+                            }
+                          }}
+                          className="hidden md:flex absolute -right-8 top-1.5 opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary hover:text-accent p-1 items-center justify-center cursor-pointer"
+                          title={isSpeaking && speakingMessageText === msg.text ? "Stop reading" : "Read aloud"}
+                          aria-label={isSpeaking && speakingMessageText === msg.text ? "Stop reading" : "Read aloud"}
                         >
-                          <PlayCircle size={18} />
+                          {isSpeaking && speakingMessageText === msg.text ? (
+                            <Square size={16} className="text-accent fill-current" />
+                          ) : (
+                            <PlayCircle size={18} />
+                          )}
                         </button>
                       )}
                     </div>
 
-                    {/* Timestamp */}
-                    <span className="text-[10px] text-text-secondary/60 mt-1 px-1">
-                      {timeStr}
-                    </span>
+                    {/* Timestamp & Mobile Read Aloud Action */}
+                    <div className="flex items-center gap-2 mt-1 px-1">
+                      <span className="text-[10px] text-text-secondary/60">
+                        {timeStr}
+                      </span>
+                      {isAi && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isSpeaking && speakingMessageText === msg.text) {
+                              stopSpeaking();
+                            } else {
+                              speak(msg.text, true);
+                            }
+                          }}
+                          className={`md:hidden inline-flex items-center gap-1 text-[11px] py-0.5 px-2 rounded-full border transition-all active:scale-95 touch-manipulation cursor-pointer ${
+                            isSpeaking && speakingMessageText === msg.text
+                              ? 'bg-accent/15 border-accent/40 text-accent font-medium'
+                              : 'bg-surface/80 border-text-secondary/25 text-text-secondary hover:text-accent'
+                          }`}
+                          title={isSpeaking && speakingMessageText === msg.text ? "Stop reading" : "Read aloud"}
+                          aria-label={isSpeaking && speakingMessageText === msg.text ? "Stop reading" : "Read aloud"}
+                        >
+                          {isSpeaking && speakingMessageText === msg.text ? (
+                            <>
+                              <Square size={11} className="fill-current text-accent" />
+                              <span className="text-[10px]">Stop</span>
+                            </>
+                          ) : (
+                            <>
+                              <PlayCircle size={12} className="text-accent" />
+                              <span className="text-[10px]">Read aloud</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {!isAi && (
