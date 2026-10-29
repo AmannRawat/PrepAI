@@ -181,35 +181,47 @@ def end_trace(
 
         sanitized_error = sanitize_error_message(error)
 
-        if error:
-            run.end(
-                outputs={
-                    "status": "failed",
-                    "error_type": type(error).__name__,
-                    "content_redacted": True,
-                },
-                error=sanitized_error,
-                extra={
-                    "metadata": {
-                        "duration_ms": duration_ms,
-                        **usage_info,
-                    }
-                },
-            )
-        else:
-            run.end(
-                outputs={
-                    "status": "success",
-                    "response_chars": response_length,
-                    "content_redacted": True,
-                },
-                extra={
-                    "metadata": {
-                        "duration_ms": duration_ms,
-                        **usage_info,
-                    }
-                },
-            )
+        metadata_to_record = {
+            "duration_ms": duration_ms,
+            **usage_info,
+        }
+
+        outputs = (
+            {
+                "status": "failed",
+                "error_type": type(error).__name__,
+                "content_redacted": True,
+            }
+            if error
+            else {
+                "status": "success",
+                "response_chars": response_length,
+                "content_redacted": True,
+            }
+        )
+
+        try:
+            if error:
+                run.end(
+                    outputs=outputs,
+                    error=sanitized_error,
+                    metadata=metadata_to_record,
+                )
+            else:
+                run.end(
+                    outputs=outputs,
+                    metadata=metadata_to_record,
+                )
+        except TypeError:
+            # Fallback if run.end does not accept metadata kwarg in older/mock implementations
+            if hasattr(run, "add_metadata"):
+                run.add_metadata(metadata_to_record)
+            elif hasattr(run, "extra") and isinstance(run.extra, dict):
+                run.extra.setdefault("metadata", {}).update(metadata_to_record)
+            if error:
+                run.end(outputs=outputs, error=sanitized_error)
+            else:
+                run.end(outputs=outputs)
 
         run.patch()
     except Exception as e:

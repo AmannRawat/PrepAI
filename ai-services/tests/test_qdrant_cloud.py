@@ -21,13 +21,14 @@ from app.services.qdrant_service import (
     set_mock_qdrant_client,
     reset_qdrant_client,
     create_collection,
+    ensure_payload_index,
     store_embedding,
     search_similar,
     sanitize_url,
     is_remote_or_cloud_endpoint,
 )
 from app.services.rag_service import ingest_text, ingest_chunks, retrieve_context, generate_rag_answer
-from qdrant_client.models import Distance, VectorParams
+from qdrant_client.models import Distance, VectorParams, PayloadSchemaType
 
 
 class MockCollectionDescription:
@@ -41,9 +42,10 @@ class MockCollectionsResponse:
 
 
 class MockCollectionInfo:
-    def __init__(self, size=3072, distance=Distance.COSINE):
+    def __init__(self, size=3072, distance=Distance.COSINE, payload_schema=None):
         self.config = MagicMock()
         self.config.params.vectors = VectorParams(size=size, distance=distance)
+        self.payload_schema = payload_schema if payload_schema is not None else {}
 
 
 class MockPoint:
@@ -261,6 +263,66 @@ class TestQdrantCloudMigration(unittest.TestCase):
         condition = query_filter.must[0]
         self.assertEqual(condition.key, "document_id")
         self.assertEqual(condition.match.value, "target-doc-99")
+
+    def test_ensure_payload_index_creates_keyword_index(self):
+        mock_client = MagicMock()
+        mock_client.get_collection.return_value = MockCollectionInfo(payload_schema={})
+        set_mock_qdrant_client(mock_client)
+
+        success = ensure_payload_index("prepai_knowledge", "document_id")
+
+        self.assertTrue(success)
+        mock_client.create_payload_index.assert_called_once()
+        call_kwargs = mock_client.create_payload_index.call_args[1]
+        self.assertEqual(call_kwargs["collection_name"], "prepai_knowledge")
+        self.assertEqual(call_kwargs["field_name"], "document_id")
+        self.assertEqual(call_kwargs["field_schema"], PayloadSchemaType.KEYWORD)
+        self.assertTrue(call_kwargs["wait"])
+
+    def test_ensure_payload_index_idempotent_when_already_exists(self):
+        mock_client = MagicMock()
+        mock_client.get_collection.return_value = MockCollectionInfo(
+            payload_schema={"document_id": MagicMock()}
+        )
+        set_mock_qdrant_client(mock_client)
+
+        success = ensure_payload_index("prepai_knowledge", "document_id")
+
+        self.assertTrue(success)
+        mock_client.create_payload_index.assert_not_called()
+
+    def test_search_similar_auto_heals_missing_payload_index(self):
+        mock_client = MagicMock()
+        mock_client.get_collections.return_value = MockCollectionsResponse(["prepai_knowledge"])
+        mock_client.get_collection.return_value = MockCollectionInfo(payload_schema={})
+
+        # First query fails with index required error, second succeeds after index creation
+        mock_client.query_points.side_effect = [
+            Exception('Index required but not found for "document_id" of one of the following types: [keyword, uuid].'),
+            MockQueryResponse(
+                [
+                    MockPoint(
+                        point_id="p-1",
+                        score=0.91,
+                        payload={
+                            "text": "Recovered resume chunk text",
+                            "document_id": "doc-autoheal",
+                            "filename": "resume.pdf",
+                            "chunk_index": 0,
+                        },
+                    )
+                ]
+            ),
+        ]
+        set_mock_qdrant_client(mock_client)
+
+        results = search_similar([0.1] * 3072, document_id="doc-autoheal", limit=3)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["text"], "Recovered resume chunk text")
+        self.assertEqual(results[0]["document_id"], "doc-autoheal")
+        self.assertEqual(mock_client.query_points.call_count, 2)
+        mock_client.create_payload_index.assert_called_once()
 
     # -------------------------------------------------------------------------
     # 7 & 8. Outage & Authentication Error Handling

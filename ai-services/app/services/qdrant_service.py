@@ -11,6 +11,7 @@ from qdrant_client.models import (
     Filter,
     FieldCondition,
     MatchValue,
+    PayloadSchemaType,
 )
 
 logger = logging.getLogger(__name__)
@@ -205,11 +206,54 @@ def _handle_qdrant_exception(e: Exception, operation: str) -> None:
     raise VectorServiceUnavailableError(f"Vector storage operation '{operation}' failed.") from e
 
 
+def ensure_payload_index(
+    collection_name: Optional[str] = None,
+    field_name: str = "document_id",
+    field_schema: Any = PayloadSchemaType.KEYWORD,
+) -> bool:
+    """
+    Safely and idempotently ensures that a payload index exists for the specified field
+    on the target collection. Does not recreate or delete collections, delete vectors,
+    or modify existing dimensions.
+    Returns True if the index is already present or was created successfully.
+    """
+    target_collection = collection_name or get_collection_name()
+    client = get_qdrant_client()
+
+    try:
+        col_info = client.get_collection(collection_name=target_collection)
+        payload_schema = getattr(col_info, "payload_schema", None)
+        if isinstance(payload_schema, dict) and field_name in payload_schema:
+            return True
+
+        schema_value = getattr(field_schema, "value", field_schema)
+        client.create_payload_index(
+            collection_name=target_collection,
+            field_name=field_name,
+            field_schema=field_schema,
+            wait=True,
+        )
+        logger.info(
+            f"[Qdrant Service] Created payload index for '{field_name}' "
+            f"({schema_value}) on collection '{target_collection}'"
+        )
+        return True
+    except Exception as e:
+        err_msg = str(e).lower()
+        if "already exists" in err_msg or "conflict" in err_msg:
+            return True
+        logger.warning(
+            f"[Qdrant Service] Unable to ensure payload index '{field_name}' on '{target_collection}': {e}"
+        )
+        return False
+
+
 def create_collection(vector_size: Optional[int] = None) -> None:
     """
     Creates or validates the dedicated PrepAI collection (default prepai_knowledge)
     with specified dimensions (default 3072) and Cosine distance.
-    Validates schema compatibility if collection already exists.
+    Validates schema compatibility if collection already exists and idempotently
+    ensures required payload index on document_id exists.
     """
     if vector_size is None:
         try:
@@ -245,6 +289,9 @@ def create_collection(vector_size: Optional[int] = None) -> None:
                     f"Vector collection '{target_collection}' exists with dimension {actual_size}, "
                     f"which is incompatible with required model dimension {vector_size}."
                 )
+
+            # Ensure payload index on document_id exists for existing collection
+            ensure_payload_index(target_collection, "document_id", PayloadSchemaType.KEYWORD)
             return
 
         # Collection does not exist: create with strict schema
@@ -256,6 +303,9 @@ def create_collection(vector_size: Optional[int] = None) -> None:
             ),
         )
         logger.info(f"[Qdrant Service] Created collection '{target_collection}' (size={vector_size}, distance=COSINE)")
+
+        # Ensure payload index on document_id exists for newly created collection
+        ensure_payload_index(target_collection, "document_id", PayloadSchemaType.KEYWORD)
 
     except VectorServiceIncompatibleError:
         raise
@@ -313,19 +363,38 @@ def search_similar(
         if not any(c.name == target_collection for c in collections_response.collections):
             return []
 
-        results = client.query_points(
-            collection_name=target_collection,
-            query=vector,
-            query_filter=Filter(
-                must=[
-                    FieldCondition(
-                        key="document_id",
-                        match=MatchValue(value=document_id),
-                    )
-                ]
-            ),
-            limit=limit,
+        query_filter = Filter(
+            must=[
+                FieldCondition(
+                    key="document_id",
+                    match=MatchValue(value=document_id),
+                )
+            ]
         )
+
+        try:
+            results = client.query_points(
+                collection_name=target_collection,
+                query=vector,
+                query_filter=query_filter,
+                limit=limit,
+            )
+        except Exception as query_err:
+            err_str = str(query_err).lower()
+            if "index required" in err_str and "document_id" in err_str:
+                logger.info(
+                    f"[Qdrant Service] Missing payload index for 'document_id' detected on '{target_collection}'. "
+                    "Creating KEYWORD index and retrying search..."
+                )
+                ensure_payload_index(target_collection, "document_id", PayloadSchemaType.KEYWORD)
+                results = client.query_points(
+                    collection_name=target_collection,
+                    query=vector,
+                    query_filter=query_filter,
+                    limit=limit,
+                )
+            else:
+                raise query_err
 
         return [
             {

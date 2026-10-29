@@ -156,6 +156,45 @@ class TestLangSmithProjectTracing(unittest.TestCase):
         self.assertIsNone(unlisted)
         print("[PASS] Cost estimation verified: exact public pricing mapped, unlisted models return None")
 
+    def test_11_end_trace_completion_records_metadata_without_warning(self):
+        """Verify end_trace uses supported RunTree.end API without 'extra' keyword warning."""
+        run = RunTree(
+            name="gemini_test",
+            run_type="llm",
+            project_name=LANGSMITH_PROJECT,
+            inputs={"stage": "test"},
+            extra={"metadata": {"app_name": "PrepAI"}},
+        )
+
+        dummy_usage = MagicMock()
+        dummy_usage.prompt_token_count = 120
+        dummy_usage.candidates_token_count = 80
+        dummy_usage.total_token_count = 200
+
+        with patch("langsmith.RunTree.patch", return_value=None):
+            end_trace(
+                run,
+                response_length=350,
+                usage_metadata=dummy_usage,
+                duration_ms=45.5,
+                error=None,
+                model="gemini-2.0-flash",
+            )
+
+        self.assertEqual(run.outputs.get("status"), "success")
+        self.assertEqual(run.outputs.get("response_chars"), 350)
+        self.assertEqual(run.outputs.get("content_redacted"), True)
+
+        metadata = run.extra.get("metadata", {})
+        self.assertEqual(metadata.get("app_name"), "PrepAI")
+        self.assertEqual(metadata.get("duration_ms"), 45.5)
+        self.assertEqual(metadata.get("prompt_tokens"), 120)
+        self.assertEqual(metadata.get("completion_tokens"), 80)
+        self.assertEqual(metadata.get("total_tokens"), 200)
+        self.assertIsNotNone(metadata.get("estimated_cost_usd"))
+        print("[PASS] end_trace verified: metadata attached cleanly to RunTree without extra kwarg warnings")
+
 
 if __name__ == "__main__":
     unittest.main()
+
