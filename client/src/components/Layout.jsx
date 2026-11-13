@@ -6,6 +6,7 @@ import ThemeToggle from './ThemeToggle';
 import StreakCounter from './StreakCounter';
 import MobileNav from './MobileNav';
 import LoginModal from './LoginModal';
+import { ServiceColdStartBanner } from './ServiceColdStartBanner';
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
 import { useTheme } from '../context/ThemeContext';
@@ -124,6 +125,9 @@ const Layout = () => {
             </button>
           )}
         </header>
+
+        {/* Recruiter-friendly backend availability & cold-start banner */}
+        <ServiceColdStartBanner />
 
         {/* Content Area with Page Transitions */}
         <div className={`flex-1 flex flex-col relative z-10 pb-20 md:pb-0 ${isDashboard ? 'p-0 pb-20 md:pb-0' : 'p-4 sm:p-6 md:p-8 pb-24 md:pb-8'}`}>

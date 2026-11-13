@@ -17,6 +17,27 @@
  */
 
 import axios from 'axios';
+import {
+  isColdStartError,
+  isAiEndpoint,
+  isAuthError,
+  RECRUITER_MESSAGES,
+} from './serviceAvailability.js';
+
+let availabilityCallbacks = {
+  onSuccess: null,
+  onFailure: null,
+};
+
+/**
+ * Connects the Axios client with the ServiceAvailability state provider.
+ */
+export function registerAvailabilityCallbacks(callbacks) {
+  availabilityCallbacks = { ...availabilityCallbacks, ...callbacks };
+  return () => {
+    availabilityCallbacks = { onSuccess: null, onFailure: null };
+  };
+}
 
 // ============================================================================
 // IN-FLIGHT DEDUPLICATION & CACHING STORAGE
@@ -315,8 +336,16 @@ if (defaultAdapter) {
 // ============================================================================
 
 axios.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    try {
+      availabilityCallbacks.onSuccess?.(response.config);
+    } catch {}
+    return response;
+  },
   (error) => {
+    const config = error?.config || error?.response?.config || {};
+
+    // 1. HTTP 429 (Rate Limit) Handling
     if (error.response?.status === 429) {
       const data = error.response.data;
       const retryAfterHeader = error.response.headers?.['retry-after'];
@@ -334,6 +363,44 @@ axios.interceptors.response.use(
         error.response.data.retryAfter = retryAfterSeconds;
       }
       error.message = friendlyMessage;
+      return Promise.reject(error);
+    }
+
+    // 2. Authentication errors (401/403) are strictly application/session errors, NEVER downtime
+    if (isAuthError(error)) {
+      return Promise.reject(error);
+    }
+
+    // 3. Cold Start / Unavailability Detection (502, 503, 504, ERR_NETWORK, ECONNABORTED)
+    if (isColdStartError(error)) {
+      try {
+        availabilityCallbacks.onFailure?.(error, config);
+      } catch {}
+
+      const isAi = isAiEndpoint(config.url);
+      const friendlyMessage = isAi
+        ? RECRUITER_MESSAGES.AI_STARTING_MSG
+        : RECRUITER_MESSAGES.NODE_STARTING_MSG;
+
+      // Provide recruiter-friendly message to prevent raw "Network Error" or "502 Bad Gateway" in UI
+      if (!error.response) {
+        error.response = {
+          status: 503,
+          data: {
+            message: friendlyMessage,
+            error: friendlyMessage,
+            isColdStart: true,
+          },
+        };
+      } else if (error.response.data && typeof error.response.data === 'object') {
+        if (!error.response.data.message || error.response.status >= 500) {
+          error.response.data.message = friendlyMessage;
+          error.response.data.error = friendlyMessage;
+          error.response.data.isColdStart = true;
+        }
+      }
+      error.userFriendlyMessage = friendlyMessage;
+      error.isColdStart = true;
     }
 
     return Promise.reject(error);

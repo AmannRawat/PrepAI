@@ -31,6 +31,7 @@ const testSuites = [
   "rate-limiter.test.js",
   "gemini-failover.test.js",
   "consistency-gate-repair.test.js",
+  "service-health.test.js",
 ];
 
 console.log("=================================================");

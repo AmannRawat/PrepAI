@@ -41,6 +41,8 @@ import remarkGfm from 'remark-gfm';
 
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
+import { useServiceAvailability } from '../context/ServiceAvailabilityContext';
+import { RECRUITER_MESSAGES } from '../utils/serviceAvailability';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { trackEvent, ALLOWED_EVENTS } from '../utils/analytics.js';
@@ -260,6 +262,7 @@ const InterviewReportCard = ({
 const BehavioralCoach = () => {
   const { getToken, isLoggedIn, userId, userName, userImageUrl } = useAuth();
   const { openLogin } = useModal();
+  const { isAiStarting } = useServiceAvailability();
   const navigate = useNavigate();
 
   const [userAvatarError, setUserAvatarError] = useState(false);
@@ -1090,7 +1093,7 @@ const BehavioralCoach = () => {
 
   // Start interview session with experience calibration
   const handleStartInterview = async () => {
-    if (requestInFlightRef.current || isStartingInterview) {
+    if (requestInFlightRef.current || isStartingInterview || isAiStarting) {
       return;
     }
 
@@ -1203,14 +1206,17 @@ const BehavioralCoach = () => {
       speak(initialQuestion);
     } catch (err) {
       console.error("Failed to start interview session:", err);
-      const isTimeout =
+      const isColdStart =
+        err.isColdStart ||
         err.code === 'ECONNABORTED' ||
         err.name === 'TimeoutError' ||
         err.message?.toLowerCase().includes('timeout') ||
+        err.response?.status === 502 ||
+        err.response?.status === 503 ||
         err.response?.status === 504;
 
-      const msg = isTimeout
-        ? (err.response?.data?.message || "The interview service took longer than expected to start your session. Please try again.")
+      const msg = isColdStart
+        ? RECRUITER_MESSAGES.AI_STARTING_MSG
         : (err.response?.data?.message || err.message || "Failed to start interview. Please ensure backend and AI services are running.");
       setErrorMessage(msg);
     } finally {
@@ -1221,7 +1227,7 @@ const BehavioralCoach = () => {
 
   // Submit interview answer to the LangGraph workflow
   const sendMessage = async (messageText) => {
-    if (requestInFlightRef.current || isLoading) {
+    if (requestInFlightRef.current || isLoading || isAiStarting) {
       return;
     }
 
@@ -1361,16 +1367,17 @@ const BehavioralCoach = () => {
       console.error("Error submitting answer to interview session:", err);
       let errorResponseText = "Sorry, I'm having trouble connecting to the interview service. Please try again.";
 
-      const isTimeout =
+      const isColdStart =
+        err.isColdStart ||
         err.code === 'ECONNABORTED' ||
         err.name === 'TimeoutError' ||
         err.message?.toLowerCase().includes('timeout') ||
+        err.response?.status === 502 ||
+        err.response?.status === 503 ||
         err.response?.status === 504;
 
-      if (isTimeout) {
-        errorResponseText =
-          err.response?.data?.message ||
-          "The interview workflow took longer than expected to process your answer. Your response was preserved below—please submit again.";
+      if (isColdStart) {
+        errorResponseText = RECRUITER_MESSAGES.AI_STARTING_MSG;
       } else if (err.response && err.response.status === 401) {
         errorResponseText = "Sorry, your session has expired. Please log in again.";
       } else if (err.response && err.response.status === 404) {
@@ -1635,13 +1642,18 @@ const BehavioralCoach = () => {
               <button
                 type="button"
                 onClick={handleStartInterview}
-                disabled={isStartingInterview}
+                disabled={isStartingInterview || isAiStarting}
                 className="w-full bg-accent hover:bg-accent-darker disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg transition-colors mt-2 flex items-center justify-center gap-2 text-sm shadow-md"
               >
                 {isStartingInterview ? (
                   <>
                     <Loader2 className="animate-spin" size={16} />
                     <span>Preparing Interview Session...</span>
+                  </>
+                ) : isAiStarting ? (
+                  <>
+                    <Loader2 className="animate-spin" size={16} />
+                    <span>AI Services Starting...</span>
                   </>
                 ) : (
                   "Start Interview"
@@ -1940,13 +1952,18 @@ const BehavioralCoach = () => {
             <button
               type="button"
               onClick={handleStartInterview}
-              disabled={isStartingInterview || isLoading}
+              disabled={isStartingInterview || isLoading || isAiStarting}
               className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-1"
             >
               {isStartingInterview ? (
                 <>
                   <Loader2 size={14} className="animate-spin" />
                   <span>Preparing Session...</span>
+                </>
+              ) : isAiStarting ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>AI Services Starting...</span>
                 </>
               ) : (
                 <>
@@ -2138,11 +2155,11 @@ const BehavioralCoach = () => {
                 </p>
                 <button
                   onClick={handleStartInterview}
-                  disabled={isStartingInterview}
+                  disabled={isStartingInterview || isAiStarting}
                   className="mt-4 px-5 py-2.5 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs hover:bg-emerald-400 transition-colors shadow-md flex items-center gap-2"
                 >
-                  {isStartingInterview ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-                  <span>Start Interview</span>
+                  {isStartingInterview || isAiStarting ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
+                  <span>{isAiStarting ? 'AI Services Starting...' : 'Start Interview'}</span>
                 </button>
               </div>
             )}
@@ -2416,12 +2433,12 @@ const BehavioralCoach = () => {
                     <button
                       type="button"
                       onClick={submitVoiceAnswer}
-                      disabled={isLoading || !(input ?? '').trim()}
+                      disabled={isLoading || isAiStarting || !(input ?? '').trim()}
                       className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold text-xs shadow-md hover:bg-emerald-400 transition-all disabled:opacity-50"
-                      title="Send answer"
+                      title={isAiStarting ? 'AI services are starting up...' : 'Send answer'}
                     >
-                      {isLoading ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                      <span>Send</span>
+                      {isLoading ? <Loader2 size={13} className="animate-spin" /> : isAiStarting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                      <span>{isAiStarting ? 'Starting...' : 'Send'}</span>
                     </button>
                   </div>
                 ) : null}
@@ -2514,10 +2531,10 @@ const BehavioralCoach = () => {
                 <button
                   type="submit"
                   className="bg-emerald-500 p-3 rounded-xl text-slate-950 font-bold hover:bg-emerald-400 transition-colors disabled:opacity-50 shrink-0"
-                  disabled={isLoading || !(input ?? '').trim()}
-                  title="Submit Answer"
+                  disabled={isLoading || isAiStarting || !(input ?? '').trim()}
+                  title={isAiStarting ? 'AI services are starting up...' : 'Submit Answer'}
                 >
-                  {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                  {isLoading || isAiStarting ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
                 </button>
 
                 {/* Exit Interview Button */}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Flame } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import { useServiceAvailability } from '../context/ServiceAvailabilityContext';
 
 const StreakCounter = () => {
   const {
@@ -9,6 +10,7 @@ const StreakCounter = () => {
     isLoggedIn,
     isLoaded,
   } = useAuth();
+  const { isNodeAvailable } = useServiceAvailability();
   const [streak, setStreak] = useState(null);
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -57,7 +59,7 @@ const StreakCounter = () => {
     return () => {
       isCancelled = true;
     };
-  }, [getToken, isLoaded, isLoggedIn]);
+  }, [getToken, isLoaded, isLoggedIn, isNodeAvailable]);
 
   // When signed out, during initial loading, or before valid data arrives, hide streak completely
   if (!isLoaded || !isLoggedIn || streak === null || streak === undefined) {

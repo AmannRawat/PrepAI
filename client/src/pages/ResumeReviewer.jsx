@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
+import { useServiceAvailability } from '../context/ServiceAvailabilityContext';
+import { RECRUITER_MESSAGES } from '../utils/serviceAvailability';
 import axios from 'axios';
 import { trackEvent, ALLOWED_EVENTS } from '../utils/analytics.js';
 
@@ -77,6 +79,7 @@ Preferred Qualifications:
 ];
 
 const ResumeReviewer = () => {
+  const { isNodeStarting } = useServiceAvailability();
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState(null);
@@ -304,10 +307,20 @@ const ResumeReviewer = () => {
         }
       })();
     } catch (err) {
-      const errorMessage =
-        err.response?.data?.error ||
-        err.message ||
-        'An unexpected error occurred while analyzing your resume.';
+      const isColdStart =
+        err.isColdStart ||
+        err.code === 'ECONNABORTED' ||
+        err.response?.status === 502 ||
+        err.response?.status === 503 ||
+        err.response?.status === 504;
+
+      const errorMessage = isColdStart
+        ? RECRUITER_MESSAGES.NODE_STARTING_MSG
+        : (err.userFriendlyMessage ||
+           err.response?.data?.error ||
+           err.response?.data?.message ||
+           err.message ||
+           'An unexpected error occurred while analyzing your resume.');
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -519,13 +532,18 @@ const ResumeReviewer = () => {
             <button
               type="button"
               onClick={handleUpload}
-              disabled={isLoading || (!selectedFile && !fileName) || jobDescription.trim().length < 20}
+              disabled={isLoading || isNodeStarting || (!selectedFile && !fileName) || jobDescription.trim().length < 20}
               className="mt-4 w-full rounded-lg bg-accent py-2.5 px-4 text-xs font-bold text-white shadow-md hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
             >
               {isLoading ? (
                 <>
                   <Loader2 className="animate-spin h-4 w-4" />
                   <span>Analyzing Resume Against Job Description...</span>
+                </>
+              ) : isNodeStarting ? (
+                <>
+                  <Loader2 className="animate-spin h-4 w-4" />
+                  <span>Server Waking Up...</span>
                 </>
               ) : (
                 <>

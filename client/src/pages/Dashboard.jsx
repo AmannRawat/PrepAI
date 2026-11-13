@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useServiceAvailability } from '../context/ServiceAvailabilityContext';
 
 // 6 Curated short, professional motivational quotes
 const MOTIVATIONAL_QUOTES = [
@@ -100,6 +101,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const { userName, userId, getToken, isLoaded, isLoggedIn } = useAuth();
   const { dashboardBg } = useTheme();
+  const { isNodeAvailable } = useServiceAvailability();
 
   const [progress, setProgress] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -232,7 +234,7 @@ const Dashboard = () => {
     return () => {
       isMounted = false;
     };
-  }, [getToken, isLoaded, isLoggedIn, userId]);
+  }, [getToken, isLoaded, isLoggedIn, userId, isNodeAvailable]);
 
   // Dynamic time-aware greeting
   const getGreeting = () => {

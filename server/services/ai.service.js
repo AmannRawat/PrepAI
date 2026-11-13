@@ -30,6 +30,45 @@ export const AI_SERVICE_URL = getAiServiceUrl();
 export const AI_SERVICE_TIMEOUT_MS =
   parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 120000;
 
+export const AI_HEALTH_CHECK_TIMEOUT_MS =
+  parseInt(process.env.AI_HEALTH_CHECK_TIMEOUT_MS, 10) || 3000;
+
+/**
+ * Lightweight, non-blocking health probe to determine if the upstream
+ * Python FastAPI AI service is responsive or cold-starting.
+ * 
+ * Never throws an unhandled exception or leaks secrets/internal endpoints.
+ * @param {number} timeoutMs - Maximum milliseconds to wait for a response (default AI_HEALTH_CHECK_TIMEOUT_MS)
+ * @returns {Promise<{ available: boolean, status: string }>}
+ */
+export async function checkAiHealth(timeoutMs = AI_HEALTH_CHECK_TIMEOUT_MS) {
+  const url = buildAiServiceUrl("/health");
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (response.ok) {
+      return {
+        available: true,
+        status: "available",
+      };
+    }
+
+    return {
+      available: false,
+      status: "starting",
+    };
+  } catch {
+    // Timeout, network error, or connection refused typically indicates service is sleeping / starting up
+    return {
+      available: false,
+      status: "starting",
+    };
+  }
+}
+
 export class AiServiceError extends Error {
   constructor(message, { status, endpoint, responseBody, details, retryAfter = null, headers = {} } = {}) {
     super(message);

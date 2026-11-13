@@ -13,6 +13,7 @@ import resumeRoutes from "./routes/resume.routes.js";
 import behavioralRoutes from "./routes/behavioral.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import interviewRoutes from "./routes/interview.routes.js";
+import healthRoutes from "./routes/health.routes.js";
 
 const PORT = process.env.PORT || 5000;
 
@@ -45,7 +46,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Health probes for deployment monitoring and uptime heartbeats
+// Health probes for deployment monitoring, uptime heartbeats, and cold-start detection
 app.get('/', (req, res) => {
     res.status(200).json({ message: "PrepAI Backend is running!" });
 });
@@ -53,6 +54,10 @@ app.get('/', (req, res) => {
 app.get('/ping', (req, res) => {
     res.status(200).send('Pong');
 });
+
+// Service health and availability probes
+app.use("/api/health", healthRoutes);
+app.use("/health", healthRoutes);
 
 // DSA problem generation, test-case verification, and code execution endpoints
 app.use("/api", dsaRoutes);

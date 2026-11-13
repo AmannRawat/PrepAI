@@ -12,6 +12,8 @@ import { formatCode } from '../utils/codeFormatter.js';
 
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
+import { useServiceAvailability } from '../context/ServiceAvailabilityContext';
+import { RECRUITER_MESSAGES } from '../utils/serviceAvailability';
 import { trackEvent, ALLOWED_EVENTS } from '../utils/analytics.js';
 import {
   CheckCircle,
@@ -91,6 +93,7 @@ function isGenericStarterCode(code) {
 const DsaArena = () => {
   const { getToken, isLoggedIn, userId } = useAuth();
   const { openLogin } = useModal();
+  const { isNodeStarting } = useServiceAvailability();
   const [codeByLanguage, setCodeByLanguage] = useState({});
   const [language, setLanguage] = useState(() => {
     const saved = localStorage.getItem('prepai_default_language');
@@ -602,9 +605,19 @@ const DsaArena = () => {
       }
     } catch (err) {
       if (isMountedRef.current) {
-        const errorMessage = err.response?.data?.error
-          ? err.response.data.error
-          : 'An unexpected error occurred.';
+        const isColdStart =
+          err.isColdStart ||
+          err.code === 'ECONNABORTED' ||
+          err.response?.status === 502 ||
+          err.response?.status === 503 ||
+          err.response?.status === 504;
+
+        const errorMessage = isColdStart
+          ? RECRUITER_MESSAGES.NODE_STARTING_MSG
+          : (err.userFriendlyMessage ||
+             err.response?.data?.error ||
+             err.response?.data?.message ||
+             'An unexpected error occurred.');
 
         setError(errorMessage);
       }
@@ -774,9 +787,19 @@ const DsaArena = () => {
       setRunResults(response.data);
       saveDsaState({ runResults: response.data, executionResults: null, evaluationError: null });
     } catch (err) {
-      const errorMessage = err.response?.data?.error
-        ? err.response.data.error
-        : 'An unexpected error occurred while running code.';
+      const isColdStart =
+        err.isColdStart ||
+        err.code === 'ECONNABORTED' ||
+        err.response?.status === 502 ||
+        err.response?.status === 503 ||
+        err.response?.status === 504;
+
+      const errorMessage = isColdStart
+        ? RECRUITER_MESSAGES.NODE_STARTING_MSG
+        : (err.userFriendlyMessage ||
+           err.response?.data?.error ||
+           err.response?.data?.message ||
+           'An unexpected error occurred while running code.');
 
       setRunResults(null);
       setExecutionResults(null);
@@ -903,9 +926,19 @@ const DsaArena = () => {
         }
       })();
     } catch (err) {
-      const errorMessage = err.response?.data?.error
-        ? err.response.data.error
-        : 'An unexpected error occurred.';
+      const isColdStart =
+        err.isColdStart ||
+        err.code === 'ECONNABORTED' ||
+        err.response?.status === 502 ||
+        err.response?.status === 503 ||
+        err.response?.status === 504;
+
+      const errorMessage = isColdStart
+        ? RECRUITER_MESSAGES.NODE_STARTING_MSG
+        : (err.userFriendlyMessage ||
+           err.response?.data?.error ||
+           err.response?.data?.message ||
+           'An unexpected error occurred.');
 
       setRunResults(null);
       setExecutionResults(null);
@@ -1245,7 +1278,7 @@ const DsaArena = () => {
         {/* Generate Problem Button */}
         <button
           onClick={generateProblem}
-          disabled={isLoading}
+          disabled={isLoading || isNodeStarting}
           type="button"
           className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-md transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
@@ -1253,6 +1286,11 @@ const DsaArena = () => {
             <>
               <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
               <span>Generating...</span>
+            </>
+          ) : isNodeStarting ? (
+            <>
+              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span>Server Waking Up...</span>
             </>
           ) : (
             <>

@@ -348,9 +348,15 @@ export const generalLimiter = createRateLimiter({
   max: parseConfigInt("RATE_LIMIT_GENERAL_MAX", ["RATE_LIMIT_MAX_REQUESTS"], 100),
   message: "Too many requests to PrepAI API. Please slow down and try again shortly.",
   skip: (req) => {
-    // Never throttle root health checks or ping probes
+    // Never throttle root health checks, ping probes, or service availability endpoints
     const path = req.path;
-    if (path === "/" || path === "/ping" || path === "/health") {
+    if (
+      path === "/" ||
+      path === "/ping" ||
+      path === "/health" ||
+      path.startsWith("/api/health") ||
+      path.startsWith("/health")
+    ) {
       return true;
     }
     // Skip dedicated AI & expensive operations covered by specialized limiters

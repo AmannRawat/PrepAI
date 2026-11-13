@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/react";
 
 import { ThemeProvider } from "../context/ThemeContext.jsx";
 import { AuthProvider } from "../context/AuthContext.jsx";
+import { ServiceAvailabilityProvider } from "../context/ServiceAvailabilityContext.jsx";
 import { ModalProvider } from "../context/ModalContext.jsx";
 import { getClerkAppearance } from "../utils/clerkTheme";
 
@@ -30,9 +31,11 @@ const RootProviders = () => {
         >
             <ThemeProvider>
                 <AuthProvider>
-                    <ModalProvider>
-                        <Outlet />
-                    </ModalProvider>
+                    <ServiceAvailabilityProvider>
+                        <ModalProvider>
+                            <Outlet />
+                        </ModalProvider>
+                    </ServiceAvailabilityProvider>
                 </AuthProvider>
             </ThemeProvider>
         </ClerkProvider>
