@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Calendar as CalendarIcon,
@@ -16,6 +16,7 @@ import {
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
+import { getApiBaseUrl, isColdStartError } from '../utils/serviceAvailability';
 
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -68,77 +69,114 @@ const CalendarPage = () => {
     setCurrentDate(new Date());
   };
 
-  useEffect(() => {
-    let isMounted = true;
+  const abortControllerRef = useRef(null);
 
-    const runFetch = async () => {
-      if (!isLoaded || !isLoggedIn) {
-        if (isMounted) {
-          setActiveDays([]);
-          setStreak(0);
-          setStreakStartDate(null);
-          setMilestones([]);
-          setIsLoading(false);
-          setError(null);
-        }
+  const fetchCalendarData = useCallback(async () => {
+    if (!isLoaded || !isLoggedIn) {
+      setActiveDays([]);
+      setStreak(0);
+      setStreakStartDate(null);
+      setMilestones([]);
+      setIsLoading(false);
+      setError(null);
+      return;
+    }
+
+    // Cancel any previous in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setIsLoading(true);
+    setError(null);
+
+    // Enforce 6-second client request timeout
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 6000);
+
+    try {
+      const token = await getToken();
+      if (!token) {
+        setIsLoading(false);
         return;
       }
 
-      if (isMounted) {
-        setIsLoading(true);
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const baseUrl = getApiBaseUrl();
+      const res = await axios.get(
+        `${baseUrl}/api/user/calendar`,
+        {
+          params: {
+            year,
+            month: month + 1,
+            timezone: tz,
+          },
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          signal: controller.signal,
+          timeout: 6000,
+        }
+      );
+
+      clearTimeout(timeoutId);
+
+      if (res.data) {
+        setActiveDays(Array.isArray(res.data.activeDays) ? res.data.activeDays : []);
+        setStreak(typeof res.data.currentStreak === 'number' ? res.data.currentStreak : 0);
+        setStreakStartDate(res.data.streakStartDate || null);
+        setMilestones(Array.isArray(res.data.todayMilestones) ? res.data.todayMilestones : []);
         setError(null);
       }
+    } catch (err) {
+      clearTimeout(timeoutId);
 
-      try {
-        const token = await getToken();
-        if (!token || !isMounted) {
-          if (isMounted) setIsLoading(false);
-          return;
-        }
+      // Don't overwrite state if aborted by caller unmount or next request
+      if (err?.name === 'CanceledError' && !controller.signal.aborted) {
+        return;
+      }
 
-        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-        const res = await axios.get(
-          `${import.meta.env.VITE_API_URL}/api/user/calendar`,
-          {
-            params: {
-              year,
-              month: month + 1,
-              timezone: tz,
-            },
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
+      console.error('Failed to fetch calendar activity:', err);
+      if (
+        isColdStartError(err) ||
+        err?.code === 'ERR_NETWORK' ||
+        err?.code === 'ECONNABORTED' ||
+        err?.name === 'AbortError' ||
+        err?.message?.toLowerCase().includes('network error') ||
+        err?.message?.toLowerCase().includes('timeout')
+      ) {
+        setError(
+          "Your calendar is temporarily unavailable because we couldn't connect to the server."
         );
+      } else {
+        setError(
+          err?.response?.data?.message || 'Unable to load your activity data. Please try again.'
+        );
+      }
+      setActiveDays([]);
+      setStreak(0);
+      setStreakStartDate(null);
+      setMilestones([]);
+    } finally {
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false);
+        abortControllerRef.current = null;
+      }
+    }
+  }, [getToken, isLoaded, isLoggedIn, month, year, userId]);
 
-        if (isMounted && res.data) {
-          setActiveDays(Array.isArray(res.data.activeDays) ? res.data.activeDays : []);
-          setStreak(typeof res.data.currentStreak === 'number' ? res.data.currentStreak : 0);
-          setStreakStartDate(res.data.streakStartDate || null);
-          setMilestones(Array.isArray(res.data.todayMilestones) ? res.data.todayMilestones : []);
-        }
-      } catch (err) {
-        if (isMounted) {
-          console.error('Failed to fetch calendar activity:', err);
-          setError('Unable to load your activity data. Please try again.');
-          setActiveDays([]);
-          setStreak(0);
-          setStreakStartDate(null);
-          setMilestones([]);
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+  useEffect(() => {
+    fetchCalendarData();
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
       }
     };
-
-    runFetch();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [getToken, isLoaded, isLoggedIn, month, year, userId]);
+  }, [fetchCalendarData]);
 
   const realToday = new Date();
   const isViewingCurrentMonth =
@@ -295,16 +333,18 @@ const CalendarPage = () => {
             <>
               {/* Error Alert */}
               {error && (
-                <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-start gap-2.5">
-                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-950 dark:text-amber-200 text-xs flex items-start gap-2.5 shadow-sm">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5 text-amber-500" />
                   <div className="flex-1">
-                    <p>{error}</p>
+                    <p className="leading-relaxed font-medium">{error}</p>
                     <button
                       type="button"
                       onClick={fetchCalendarData}
-                      className="mt-2 underline font-semibold hover:text-red-300"
+                      disabled={isLoading}
+                      className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-elevated border border-border text-xs font-semibold text-text-primary transition shadow-xs cursor-pointer disabled:opacity-50"
                     >
-                      Try Again
+                      <RotateCcw size={12} className={isLoading ? 'animate-spin' : ''} />
+                      <span>{isLoading ? 'Reconnecting...' : 'Retry Connection'}</span>
                     </button>
                   </div>
                 </div>

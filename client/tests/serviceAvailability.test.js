@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import {
+  AVAILABILITY_STATE,
   SERVICE_STATUS,
   RECRUITER_MESSAGES,
+  getApiBaseUrl,
   isColdStartError,
   isAuthError,
   isAiEndpoint,
@@ -59,6 +61,14 @@ runTest('Exact recruiter title and message for AI service cold start', () => {
   assert.equal(
     RECRUITER_MESSAGES.AI_STARTING_MSG,
     'The application is available, but our AI processing service is temporarily starting up. Your session is safe. Please try again shortly.'
+  );
+});
+
+runTest('Exact recruiter title and message for unavailable demo server', () => {
+  assert.equal(RECRUITER_MESSAGES.UNAVAILABLE_TITLE, 'Unable to connect to the demo server');
+  assert.equal(
+    RECRUITER_MESSAGES.UNAVAILABLE_MSG,
+    'Our demo server is currently unavailable or taking longer than expected to start. Please try reconnecting.'
   );
 });
 
@@ -252,6 +262,66 @@ await runAsyncTest('Axios interceptor does not rewrite 401 authentication errors
   } catch (err) {
     assert.equal(err.isColdStart, undefined);
     assert.equal(err.response?.data?.message, 'Token expired');
+  }
+});
+
+// --- Suite 7: Authoritative State Machine & URL Resolution ---
+console.log('\n--- Suite 7: Authoritative State Machine & URL Resolution ---');
+
+runTest('Authoritative AVAILABILITY_STATE enums are defined strictly', () => {
+  assert.equal(AVAILABILITY_STATE.IDLE, 'IDLE');
+  assert.equal(AVAILABILITY_STATE.CHECKING, 'CHECKING');
+  assert.equal(AVAILABILITY_STATE.AVAILABLE, 'AVAILABLE');
+  assert.equal(AVAILABILITY_STATE.CONNECTING, 'CONNECTING');
+  assert.equal(AVAILABILITY_STATE.UNAVAILABLE, 'UNAVAILABLE');
+  assert.equal(AVAILABILITY_STATE.PAUSED, 'PAUSED');
+});
+
+runTest('getApiBaseUrl returns valid local fallback without trailing slash', () => {
+  const url = getApiBaseUrl();
+  assert.ok(url.startsWith('http'), `URL should start with http: ${url}`);
+  assert.equal(url.endsWith('/'), false, `URL should not have trailing slash: ${url}`);
+});
+
+runTest('Default backoff delay caps at 8000ms max', () => {
+  const d1 = calculateBackoffDelay(1);
+  const d5 = calculateBackoffDelay(5);
+  assert.ok(d1 >= 1800 && d1 <= 2200, `Default attempt 1 around 2s: ${d1}`);
+  assert.ok(d5 <= 8800, `Default attempt 5 capped around 8s: ${d5}`);
+});
+
+await runAsyncTest('probeServiceHealth cleanly captures caller abort signal', async () => {
+  const controller = new AbortController();
+  controller.abort();
+
+  const result = await probeServiceHealth('http://localhost:5000', controller.signal);
+  assert.equal(result.isAborted, true);
+  assert.equal(result.node, SERVICE_STATUS.STARTING);
+});
+
+await runAsyncTest('probeServiceHealth timeout is treated as failed check, NOT caller aborted', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = (_url, options) => {
+    return new Promise((_, reject) => {
+      // simulate fetch hanging until signal aborted by internal timeout
+      if (options?.signal) {
+        options.signal.addEventListener('abort', () => {
+          const err = new Error('The operation was aborted');
+          err.name = 'AbortError';
+          reject(err);
+        });
+      }
+    });
+  };
+
+  try {
+    // 50ms fast timeout for test
+    const result = await probeServiceHealth('http://localhost:5000', null, 50);
+    assert.equal(result.isAborted, false, 'Timeout must not be marked as caller aborted');
+    assert.equal(result.isTimeout, true, 'Timeout flag must be set to true');
+    assert.equal(result.node, SERVICE_STATUS.STARTING);
+  } finally {
+    global.fetch = originalFetch;
   }
 });
 

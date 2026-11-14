@@ -8,6 +8,14 @@ export default defineConfig({
     react(),
     tailwindcss(), // This is the new official plugin
   ],
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_API_URL || 'http://localhost:5000',
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     rollupOptions: {
       // This tells Vite to ignore these Node.js-specific modules

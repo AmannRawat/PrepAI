@@ -9,21 +9,26 @@ import {
 } from 'lucide-react';
 import { useServiceAvailability } from '../context/ServiceAvailabilityContext';
 import {
+  AVAILABILITY_STATE,
   SERVICE_STATUS,
   RECRUITER_MESSAGES,
 } from '../utils/serviceAvailability';
 
 export const ServiceColdStartBanner = () => {
   const {
+    availabilityState,
+    isChecking,
+    isConnecting,
+    isUnavailable,
+    isPaused,
     nodeStatus,
     aiStatus,
+    isNodeAvailable,
+    isAiAvailable,
     isNodeStarting,
     isAiStarting,
-    isChecking,
-    isRetrying,
     retryCount,
     maxRetries,
-    retriesExhausted,
     showRecoveryNotice,
     manualRetry,
   } = useServiceAvailability();
@@ -31,11 +36,23 @@ export const ServiceColdStartBanner = () => {
   const isBothStarting = isNodeStarting && isAiStarting;
   const isNodeOnlyStarting = isNodeStarting && !isAiStarting;
   const isAiOnlyStarting = !isNodeStarting && isAiStarting;
+  const isRetriesExhausted =
+    isUnavailable ||
+    isPaused ||
+    availabilityState === AVAILABILITY_STATE.UNAVAILABLE ||
+    availabilityState === AVAILABILITY_STATE.PAUSED;
+
+  // The banner is visible when a service is actively starting/reconnecting/paused/unavailable, or during recovery
+  // It remains strictly hidden on initial app load when services are already awake (preventing flashing)
+  const isServiceDegraded =
+    isNodeStarting ||
+    isAiStarting ||
+    isConnecting ||
+    isUnavailable ||
+    isPaused;
 
   const isVisible =
-    isBothStarting ||
-    isNodeOnlyStarting ||
-    isAiOnlyStarting ||
+    (isServiceDegraded && availabilityState !== AVAILABILITY_STATE.AVAILABLE && availabilityState !== AVAILABILITY_STATE.IDLE) ||
     showRecoveryNotice;
 
   if (!isVisible) {
@@ -53,6 +70,18 @@ export const ServiceColdStartBanner = () => {
     message = 'Connection established! All demo services are active and ready.';
     Icon = CheckCircle2;
     accentColor = 'emerald';
+  } else if (availabilityState === AVAILABILITY_STATE.UNAVAILABLE || isUnavailable) {
+    if (isAiOnlyStarting) {
+      title = 'AI services are currently unavailable';
+      message = 'The application server is ready, but AI processing is taking longer than expected. Please try reconnecting.';
+      Icon = Sparkles;
+      accentColor = 'blue';
+    } else {
+      title = RECRUITER_MESSAGES.UNAVAILABLE_TITLE;
+      message = RECRUITER_MESSAGES.UNAVAILABLE_MSG;
+      Icon = Server;
+      accentColor = 'amber';
+    }
   } else if (isBothStarting) {
     title = RECRUITER_MESSAGES.BOTH_STARTING_TITLE;
     message = RECRUITER_MESSAGES.BOTH_STARTING_MSG;
@@ -68,15 +97,37 @@ export const ServiceColdStartBanner = () => {
     message = RECRUITER_MESSAGES.AI_STARTING_MSG;
     Icon = Sparkles;
     accentColor = 'blue';
+  } else {
+    title = RECRUITER_MESSAGES.NODE_STARTING_TITLE;
+    message = RECRUITER_MESSAGES.NODE_STARTING_MSG;
   }
+
+  // Authoritative status badge projection
+  const getBadgeText = () => {
+    if (showRecoveryNotice) return 'Ready';
+    if (availabilityState === AVAILABILITY_STATE.UNAVAILABLE || isUnavailable) return 'Unavailable';
+    if (availabilityState === AVAILABILITY_STATE.PAUSED || isPaused) return 'Paused';
+    if (availabilityState === AVAILABILITY_STATE.CHECKING) return 'Checking...';
+    if (availabilityState === AVAILABILITY_STATE.CONNECTING) {
+      return retryCount > 0 ? `Connecting (${retryCount}/${maxRetries})` : 'Connecting...';
+    }
+    return 'Starting';
+  };
+
+  // Authoritative retry button label and state
+  const getButtonLabel = () => {
+    if (isChecking) return 'Checking...';
+    if (isRetriesExhausted) return 'Retry Connection';
+    return 'Retry Now';
+  };
 
   return (
     <AnimatePresence>
       <motion.div
-        initial={{ opacity: 0, y: -12 }}
+        initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -12 }}
-        transition={{ duration: 0.2 }}
+        exit={{ opacity: 0, y: -8 }}
+        transition={{ duration: 0.18 }}
         className="w-full px-4 sm:px-6 pt-3 pb-1 shrink-0 z-40"
       >
         <div
@@ -90,8 +141,8 @@ export const ServiceColdStartBanner = () => {
               : 'bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-100'
           }`}
         >
-          {/* Subtle animated top shimmer when retrying */}
-          {(isRetrying || isChecking) && (
+          {/* Subtle animated top shimmer when actively checking */}
+          {isChecking && (
             <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-current to-transparent opacity-40 animate-pulse" />
           )}
 
@@ -108,9 +159,7 @@ export const ServiceColdStartBanner = () => {
               >
                 <Icon
                   size={18}
-                  className={
-                    isRetrying || isChecking ? 'animate-spin' : ''
-                  }
+                  className={isChecking ? 'animate-spin' : ''}
                 />
               </div>
 
@@ -119,17 +168,11 @@ export const ServiceColdStartBanner = () => {
                   <h4 className="text-sm font-semibold tracking-tight">
                     {title}
                   </h4>
-                  {/* Status Badges */}
+                  {/* Status Badge */}
                   {!showRecoveryNotice && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-surface/50 border border-border/50 text-text-secondary">
-                      <Clock size={10} className="animate-spin" />
-                      {retriesExhausted
-                        ? 'Paused'
-                        : isChecking
-                        ? 'Checking...'
-                        : retryCount > 0
-                        ? `Connecting (${retryCount}/${maxRetries})`
-                        : 'Starting'}
+                      <Clock size={10} className={isChecking ? 'animate-spin' : ''} />
+                      {getBadgeText()}
                     </span>
                   )}
                 </div>
@@ -144,27 +187,23 @@ export const ServiceColdStartBanner = () => {
                     <span className="text-text-tertiary">Service status:</span>
                     <span
                       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${
-                        nodeStatus === SERVICE_STATUS.AVAILABLE
+                        isNodeAvailable
                           ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-medium'
                           : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                       }`}
                     >
                       Application Server:{' '}
-                      {nodeStatus === SERVICE_STATUS.AVAILABLE
-                        ? 'Ready'
-                        : 'Starting'}
+                      {isNodeAvailable ? 'Ready' : 'Starting'}
                     </span>
                     <span
                       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${
-                        aiStatus === SERVICE_STATUS.AVAILABLE
+                        isAiAvailable
                           ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-medium'
                           : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                       }`}
                     >
                       AI Processing:{' '}
-                      {aiStatus === SERVICE_STATUS.AVAILABLE
-                        ? 'Ready'
-                        : 'Starting'}
+                      {isAiAvailable ? 'Ready' : 'Starting'}
                     </span>
                   </div>
                 )}
@@ -179,8 +218,8 @@ export const ServiceColdStartBanner = () => {
                   onClick={manualRetry}
                   disabled={isChecking}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-sm transition-all cursor-pointer ${
-                    retriesExhausted
-                      ? 'bg-emerald-500 hover:bg-emerald-600 text-white ring-2 ring-emerald-500/30'
+                    isRetriesExhausted
+                      ? 'bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold ring-2 ring-emerald-500/30'
                       : 'bg-surface hover:bg-surface-elevated border border-border text-text-primary'
                   } disabled:opacity-50 disabled:cursor-not-allowed`}
                   title="Retry connection to demo servers"
@@ -189,13 +228,7 @@ export const ServiceColdStartBanner = () => {
                     size={12}
                     className={isChecking ? 'animate-spin' : ''}
                   />
-                  <span>
-                    {isChecking
-                      ? 'Connecting...'
-                      : retriesExhausted
-                      ? 'Retry Connection'
-                      : 'Retry Now'}
-                  </span>
+                  <span>{getButtonLabel()}</span>
                 </button>
               </div>
             )}
@@ -205,4 +238,3 @@ export const ServiceColdStartBanner = () => {
     </AnimatePresence>
   );
 };
-

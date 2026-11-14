@@ -1,9 +1,18 @@
 /**
  * Service Availability & Cold-Start Utilities
  * 
- * Provides detection, error classification, and controlled backoff calculation
+ * Provides detection, error classification, URL resolution, and state machine definitions
  * for Render free-tier multi-service cold starts (Node.js backend + FastAPI AI service).
  */
+
+export const AVAILABILITY_STATE = {
+  IDLE: 'IDLE',               // Initial state before health check begins
+  CHECKING: 'CHECKING',       // In-flight active network health probe
+  AVAILABLE: 'AVAILABLE',     // All required backend services are responsive
+  CONNECTING: 'CONNECTING',   // Waiting on exponential backoff timer for next auto-retry
+  UNAVAILABLE: 'UNAVAILABLE', // Automatic retries exhausted; demo server unavailable
+  PAUSED: 'PAUSED',           // Automatic retry limit reached; waiting for manual user retry
+};
 
 export const SERVICE_STATUS = {
   UNKNOWN: 'unknown',
@@ -24,7 +33,32 @@ export const RECRUITER_MESSAGES = {
   BOTH_STARTING_TITLE: 'Demo environment is starting',
   BOTH_STARTING_MSG:
     "PrepAI's free demo servers are waking up after inactivity. Both the application server and AI service are initializing. Thanks for your patience.",
+
+  UNAVAILABLE_TITLE: 'Unable to connect to the demo server',
+  UNAVAILABLE_MSG:
+    'Our demo server is currently unavailable or taking longer than expected to start. Please try reconnecting.',
 };
+
+/**
+ * Resolves the backend API base URL consistently across dev and production.
+ * Prevents empty or malformed strings from causing requests to route into the Vite dev server.
+ */
+export function getApiBaseUrl() {
+  const envUrl = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_API_URL : null;
+  if (typeof envUrl === 'string' && envUrl.trim() !== '') {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+
+  // If running in browser on localhost or 127.0.0.1, default to Node on port 5000
+  if (typeof window !== 'undefined' && window.location) {
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return `http://${hostname}:5000`;
+    }
+  }
+
+  return 'http://localhost:5000';
+}
 
 /**
  * Endpoint paths that proxy to or require the Python FastAPI AI service.
@@ -80,6 +114,7 @@ export function isColdStartError(error) {
 
   // Rule 4: Network transport failure or connection dropped
   const code = error?.code || '';
+  const name = error?.name || '';
   const message = (error?.message || '').toLowerCase();
 
   if (
@@ -87,9 +122,12 @@ export function isColdStartError(error) {
     code === 'ECONNABORTED' ||
     code === 'ETIMEDOUT' ||
     code === 'ECONNREFUSED' ||
+    name === 'AbortError' ||
+    name === 'TimeoutError' ||
     message.includes('network error') ||
     message.includes('failed to fetch') ||
-    message.includes('timeout')
+    message.includes('timeout') ||
+    message.includes('aborted')
   ) {
     return true;
   }
@@ -98,26 +136,29 @@ export function isColdStartError(error) {
 }
 
 /**
+ * Safe diagnostic logging helper for service availability troubleshooting.
+ * Never logs secrets, tokens, or sensitive headers.
+ */
+export function logAvailabilityDiagnostic(event, details = {}) {
+  const timestamp = new Date().toISOString();
+  console.log(`[PrepAI:Availability][${timestamp}] ${event}`, details);
+}
+
+/**
  * Computes exponential backoff delay with bounded jitter.
  * 
  * Progression:
- * Attempt 1: ~3.0s
- * Attempt 2: ~4.8s
- * Attempt 3: ~7.6s
- * Attempt 4: ~12.0s
- * Attempt 5: ~15.0s (capped at maxDelay)
- * 
- * @param {number} attempt - 1-based retry attempt number
- * @param {number} baseDelayMs - Base delay in milliseconds (default: 3000ms)
- * @param {number} multiplier - Exponential growth factor (default: 1.6)
- * @param {number} maxDelayMs - Maximum delay cap (default: 15000ms)
- * @returns {number} Delay in milliseconds
+ * Attempt 1: ~2.0s
+ * Attempt 2: ~3.0s
+ * Attempt 3: ~4.5s
+ * Attempt 4: ~6.8s
+ * Attempt 5: ~8.0s (capped at maxDelay)
  */
 export function calculateBackoffDelay(
   attempt,
-  baseDelayMs = 3000,
-  multiplier = 1.6,
-  maxDelayMs = 15000
+  baseDelayMs = 2000,
+  multiplier = 1.5,
+  maxDelayMs = 8000
 ) {
   const safeAttempt = Math.max(1, attempt);
   const rawDelay = baseDelayMs * Math.pow(multiplier, safeAttempt - 1);
@@ -125,7 +166,7 @@ export function calculateBackoffDelay(
 
   // Add small deterministic jitter (±10%) to prevent lockstep thundering herds
   const jitterRange = cappedDelay * 0.1;
-  const jitter = (Math.sin(safeAttempt) * 0.5) * jitterRange;
+  const jitter = Math.sin(safeAttempt) * 0.5 * jitterRange;
 
   return Math.round(cappedDelay + jitter);
 }
@@ -133,26 +174,47 @@ export function calculateBackoffDelay(
 /**
  * Performs a lightweight health check against the Node backend's health probe.
  * 
- * @param {string} baseUrl - Backend API base URL
- * @param {AbortSignal} [signal] - Optional abort signal
- * @param {number} [timeoutMs=8000] - Request timeout
- * @returns {Promise<{ node: string, ai: string, raw: any }>}
+ * @param {string} [baseUrl] - Backend API base URL (defaults to getApiBaseUrl())
+ * @param {AbortSignal} [signal] - Optional caller abort signal (e.g., superseding manual retry)
+ * @param {number} [timeoutMs=5000] - Bounded request timeout (defaults to 5000ms)
+ * @returns {Promise<{ node: string, ai: string, raw: any, isAborted: boolean, isTimeout: boolean, error?: any }>}
  */
 export async function probeServiceHealth(
-  baseUrl = import.meta.env.VITE_API_URL || '',
+  baseUrl,
   signal,
-  timeoutMs = 8000
+  timeoutMs = 5000,
+  probeId = `probe_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 ) {
-  const cleanBase = String(baseUrl).replace(/\/+$/, '');
+  const resolvedBase = baseUrl || getApiBaseUrl();
+  const cleanBase = String(resolvedBase).replace(/\/+$/, '');
   const url = `${cleanBase}/api/health`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  logAvailabilityDiagnostic('Health-check request preparing', { probeId, service: 'node', url });
+
+  let didTimeout = false;
+  const internalController = new AbortController();
+  const timeoutId = setTimeout(() => {
+    didTimeout = true;
+    logAvailabilityDiagnostic('Health-check request timed out', { probeId, timeoutMs });
+    internalController.abort();
+  }, timeoutMs);
 
   // Link caller signal if provided
   if (signal) {
-    signal.addEventListener('abort', () => controller.abort(), { once: true });
+    if (signal.aborted) {
+      clearTimeout(timeoutId);
+      logAvailabilityDiagnostic('Caller aborted request (already aborted)', { probeId });
+      internalController.abort();
+    } else {
+      signal.addEventListener('abort', () => {
+        clearTimeout(timeoutId);
+        logAvailabilityDiagnostic('Caller aborted request', { probeId });
+        internalController.abort();
+      }, { once: true });
+    }
   }
+
+  logAvailabilityDiagnostic('Health-check request sent', { probeId, url, timeoutMs });
 
   try {
     const res = await fetch(url, {
@@ -160,21 +222,38 @@ export async function probeServiceHealth(
       headers: {
         Accept: 'application/json',
       },
-      signal: controller.signal,
+      signal: internalController.signal,
     });
 
     clearTimeout(timeoutId);
 
+    // If caller aborted while fetch was resolving, discard result immediately
+    if (signal?.aborted) {
+      logAvailabilityDiagnostic('Caller aborted request before response processing', { probeId });
+      return {
+        node: SERVICE_STATUS.STARTING,
+        ai: SERVICE_STATUS.UNKNOWN,
+        raw: null,
+        isAborted: true,
+        isTimeout: false,
+      };
+    }
+
     if (!res.ok) {
+      logAvailabilityDiagnostic('Health-check request returned gateway error', { probeId, status: res.status });
       // 502/503 from Render reverse proxy indicates Node server is starting
       return {
         node: SERVICE_STATUS.STARTING,
         ai: SERVICE_STATUS.UNKNOWN,
         raw: null,
+        isAborted: false,
+        isTimeout: false,
       };
     }
 
     const data = await res.json();
+    logAvailabilityDiagnostic('Health-check request succeeded', { probeId, status: res.status });
+
     const nodeStatus =
       data?.services?.node?.status === 'available' || data?.services?.node?.available
         ? SERVICE_STATUS.AVAILABLE
@@ -189,17 +268,40 @@ export async function probeServiceHealth(
       node: nodeStatus,
       ai: aiStatus,
       raw: data,
+      isAborted: false,
+      isTimeout: false,
     };
   } catch (err) {
     clearTimeout(timeoutId);
 
-    // If fetch failed completely, Node server is unreachable (cold-starting or down)
+    // If aborted explicitly by caller (e.g. superseding manual retry or unmount), propagate flag
+    const isCallerAborted = Boolean(signal?.aborted);
+    if (isCallerAborted) {
+      logAvailabilityDiagnostic('Caller aborted request in catch', { probeId, error: err?.message || String(err) });
+      return {
+        node: SERVICE_STATUS.STARTING,
+        ai: SERVICE_STATUS.UNKNOWN,
+        raw: null,
+        isAborted: true,
+        isTimeout: false,
+        error: err,
+      };
+    }
+
+    logAvailabilityDiagnostic('Health-check request failed', {
+      probeId,
+      isTimeout: didTimeout,
+      error: err?.message || String(err),
+    });
+
+    // Network error, connection refused, or request timeout (must NOT be treated as aborted)
     return {
       node: SERVICE_STATUS.STARTING,
       ai: SERVICE_STATUS.UNKNOWN,
       raw: null,
+      isAborted: false,
+      isTimeout: didTimeout,
       error: err,
     };
   }
 }
-

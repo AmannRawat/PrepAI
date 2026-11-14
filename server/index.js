@@ -35,13 +35,23 @@ app.use(clerkMiddleware());
 // General rate limiter protects against abusive request bursts; health probes (/ and /ping) are exempt.
 app.use(generalLimiter);
 
+const permittedOrigins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://prepai-client-try.vercel.app",
+    "https://prepai-app.vercel.app"
+];
+
 app.use(cors({
-    // Permitted client origins for local development and production Vercel deployments.
-    origin: [
-        "http://localhost:5173",
-        "https://prepai-client-try.vercel.app",
-        "https://prepai-app.vercel.app"
-    ],
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (permittedOrigins.includes(origin)) return callback(null, true);
+        // Allow any port on localhost or 127.0.0.1 for local development
+        if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error("CORS policy violation: origin not allowed"), false);
+    },
     credentials: true
 }));
 app.use(express.json());

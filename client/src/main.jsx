@@ -20,14 +20,17 @@ import SignupPage from "./pages/SignupPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import CalendarPage from "./pages/CalendarPage.jsx";
+import RouteErrorBoundary from "./components/RouteErrorBoundary.jsx";
 
 const router = createBrowserRouter([
     {
         element: <RootProviders />,
+        errorElement: <RouteErrorBoundary />,
         children: [
             {
                 path: "/",
                 element: <Layout />,
+                errorElement: <RouteErrorBoundary />,
                 children: [
                     {
                         index: true,

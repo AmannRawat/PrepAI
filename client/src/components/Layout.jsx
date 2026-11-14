@@ -7,6 +7,7 @@ import StreakCounter from './StreakCounter';
 import MobileNav from './MobileNav';
 import LoginModal from './LoginModal';
 import { ServiceColdStartBanner } from './ServiceColdStartBanner';
+import PageErrorBoundary from './PageErrorBoundary';
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../context/ModalContext';
 import { useTheme } from '../context/ThemeContext';
@@ -140,7 +141,9 @@ const Layout = () => {
               transition={{ duration: 0.15 }}
               className="flex flex-col flex-1"
             >
-              <Outlet />
+              <PageErrorBoundary resetKey={location.pathname}>
+                <Outlet />
+              </PageErrorBoundary>
             </motion.div>
           </AnimatePresence>
         </div>
